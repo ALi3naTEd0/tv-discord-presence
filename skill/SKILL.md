@@ -17,6 +17,7 @@ Repo: `~/tv-discord-presence` (GitHub `ALi3naTEd0/tv-discord-presence`). Full do
 | Capture + Discord presence | `tvpresence.py`, `systemctl --user … tvpresence` (venv in `~/.local/share/tvpresence/venv`) |
 | Dashboard + Plex importer | `tvhistory_dashboard.py` + `.html`, `systemctl --user … tvhistory`, `http://127.0.0.1:7790` |
 | Remote access | `https://<machine>.<tailnet>.ts.net:8444` via `tailscale serve`, tailnet only. **Never Funnel.** (exact URL in `local.md`) |
+| Android TV | Mi Box over ADB (`[androidtv] host` in config, key `adbkey`); `source = androidtv` sessions, own dashboard tab. Reader: `AndroidTv` in `tvpresence.py`. Never toggle HDMI-CEC on the box without SIMPLINK on in the LG (kills audio; see gotchas). |
 | Shared DB | `~/.local/share/tvpresence/history.db` (SQLite WAL) |
 | Config | `~/.config/tvpresence/config.toml` (`[history]` section), secrets in `~/.config/tvpresence/.env` |
 | Discord app | `client_id` in config: either DRPP's public app or the user's own (see `local.md`). If presence breaks or reads "Plex", see README → Discord application; creating an app happens in the user's Discord account, so they do it. |

@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import sys
 import time
 import tomllib
@@ -51,6 +52,8 @@ DEFAULT_CONFIG = {
     "only_known": False,
     # Also show when the app is open but nothing is playing
     "show_when_browsing": False,
+    # Optional Android TV box over ADB:  [androidtv] host = "192.168.1.117"
+    "androidtv": {},
 }
 
 # Local history of what plays on the TV (identified in the dashboard)
@@ -71,6 +74,110 @@ MAX_TICK_GAP = 30  # s; after suspend or a dropout the gap is not counted as pla
 
 SYSTEM_PREFIXES = ("com.webos.", "com.lge.", "lge.", "com.lg.", "webos.")
 
+# ---------- Android TV (ADB over the network) ----------
+# package -> (name, domain for the logo)
+ANDROID_APPS: dict[str, tuple[str, str]] = {
+    "com.netflix.ninja": ("Netflix", "www.netflix.com"),
+    "com.wbd.stream": ("HBO Max", "www.hbomax.com"),
+    "com.hbo.hbonow": ("HBO Max", "www.hbomax.com"),
+    "com.disney.disneyplus": ("Disney+", "www.disneyplus.com"),
+    "com.amazon.amazonvideo.livingroom": ("Prime Video", "www.primevideo.com"),
+    "com.apple.atve.androidtv.appletv": ("Apple TV", "tv.apple.com"),
+    "com.univision.prendetv": ("ViX", "vix.com"),
+    "com.tubitv": ("Tubi", "tubitv.com"),
+    "com.mercadolibre.mercadoplay": ("Mercado Play", "play.mercadolibre.com.mx"),
+    "com.clarovideo.androidtv": ("Claro Video", "www.clarovideo.com"),
+    "com.crunchyroll.crunchyroid": ("Crunchyroll", "www.crunchyroll.com"),
+    "com.google.android.youtube.tv": ("YouTube", "www.youtube.com"),
+    "com.plexapp.android": ("Plex", "www.plex.tv"),
+    "com.spotify.tv.android": ("Spotify", "www.spotify.com"),
+}
+# Never recorded (music, YouTube/Twitch, Plex: the Plex importer and DRPP cover it)
+ANDROID_EXCLUDE = ["com.spotify.tv.android", "com.google.android.youtube.tv", "tv.twitch.android.app",
+                   "com.plexapp.android", "com.google.android.youtube.tvmusic"]
+ANDROID_SYSTEM = ("com.android.", "com.google.android.tvlauncher", "com.google.android.apps.tv.launcherx",
+                  "com.google.android.katniss", "com.mitv.", "com.xiaomi.", "android")
+
+
+class AndroidTv:
+    """Reads an Android TV box over ADB: foreground app plus the media session it publishes
+    (state, position and, when the app provides it, title/subtitle). Blocking: run in a thread."""
+
+    def __init__(self, host: str, port: int = 5555):
+        self.host, self.port = host, port
+        self.dev = None
+        self.retry_at = 0.0
+        self.key_file = CONFIG_DIR / "adbkey"
+
+    def _connect(self) -> bool:
+        if self.dev is not None and self.dev.available:
+            return True
+        if time.monotonic() < self.retry_at:
+            return False
+        from adb_shell.adb_device import AdbDeviceTcp
+        from adb_shell.auth.keygen import keygen
+        from adb_shell.auth.sign_pythonrsa import PythonRSASigner
+        if not self.key_file.exists():
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            keygen(str(self.key_file))
+            self.key_file.chmod(0o600)
+        signer = PythonRSASigner(Path(f"{self.key_file}.pub").read_text(), self.key_file.read_text())
+        dev = AdbDeviceTcp(self.host, self.port, default_transport_timeout_s=8.0)
+        try:
+            # first time: the box shows "Allow USB debugging?"; accept it (up to 60 s)
+            dev.connect(rsa_keys=[signer], auth_timeout_s=60)
+        except Exception as e:
+            log.debug("Android TV unavailable: %s", e)
+            self.retry_at = time.monotonic() + 30
+            return False
+        self.dev = dev
+        log.info("Connected to Android TV %s", self.host)
+        return True
+
+    def read(self):
+        """-> (info, media_id, hint) like the LG reader, or (None, None, None)."""
+        if not self._connect():
+            return None, None, None
+        try:
+            power = self.dev.shell("dumpsys power | grep -m1 mWakefulness=")
+            if "Awake" not in power:
+                return None, None, None
+            top = self.dev.shell("dumpsys activity activities | grep -m1 mResumedActivity")
+            m = re.search(r" ([\w.]+)/", top)
+            pkg = m.group(1) if m else ""
+            sessions = self.dev.shell("dumpsys media_session")
+        except Exception as e:
+            log.debug("Android TV read failed: %s", e)
+            try:
+                self.dev.close()
+            except Exception:
+                pass
+            self.dev = None
+            return None, None, None
+        if not pkg or pkg.startswith(ANDROID_SYSTEM):
+            return None, None, None
+        play, title, subtitle = None, None, None
+        for block in re.split(r"\n    (?=\S)", sessions):
+            if f"package={pkg}" not in block:
+                continue
+            st = re.search(r"state=PlaybackState \{state=(\d+)", block)
+            code = int(st.group(1)) if st else 0
+            if code == 3 or (play is None and code in (2, 6)):  # 3 playing, 2 paused, 6 buffering
+                play = "playing" if code in (3, 6) else "paused"
+                d = re.search(r"description=([^\n]*)", block)
+                if d:
+                    parts = [p.strip() for p in d.group(1).split(",")]
+                    title = parts[0] if parts and parts[0] not in ("", "null") else None
+                    subtitle = parts[1] if len(parts) > 1 and parts[1] not in ("", "null") else None
+        if pkg in ANDROID_APPS:
+            name, domain = ANDROID_APPS[pkg]
+            logo = FAVICON.format(domain)
+        elif play:
+            name, logo = pkg.rsplit(".", 1)[-1].capitalize(), None
+        else:
+            return None, None, None  # unknown app with no media session: not a player
+        return (pkg, name, logo, play), title, (title, subtitle)
+
 log = logging.getLogger("tvpresence")
 
 
@@ -88,18 +195,19 @@ def load_config() -> dict:
 class HistoryRecorder:
     """Turns the TV state into playback sessions in the database."""
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, source: str = "tv"):
         h = {**DEFAULT_HISTORY, **(cfg.get("history") or {})}
-        self.exclude = set(h["exclude_apps"])
+        self.source = source
+        self.exclude = set(h["exclude_apps"]) | set(h.get("exclude_android_apps", ANDROID_EXCLUDE))
         self.min_seconds = float(h["min_seconds"])
         self.pause_timeout = float(h["pause_timeout"])
         self.close_grace = float(h["close_grace"])
         self.conn = db.connect()
-        closed, resumed = db.recover(self.conn, self.min_seconds, float(h["resume_window"]))
+        closed, resumed = db.recover(self.conn, self.min_seconds, float(h["resume_window"]), source=source)
         if closed:
-            log.info("History: closed %d open session(s) on startup", closed)
+            log.info("History[%s]: closed %d open session(s) on startup", source, closed)
         if resumed:
-            log.info("History: session %d resumed after restart", resumed)
+            log.info("History[%s]: session %d resumed after restart", source, resumed)
         self._last_mono: float | None = None
         self._prev_playing = False
         self._idle_since: float | None = None
@@ -107,15 +215,15 @@ class HistoryRecorder:
 
     def _close(self, sess, why: str) -> None:
         db.close_session(self.conn, sess["id"], self.min_seconds)
-        log.info("History: session %d closed (%s)", sess["id"], why)
+        log.info("History[%s]: session %d closed (%s)", self.source, sess["id"], why)
         self._prev_playing = False
         self._left_player = False
 
-    def tick(self, info, media_id: str | None = None):
+    def tick(self, info, media_id: str | None = None, hint: tuple | None = None):
         now, mono = time.time(), time.monotonic()
         gap = 0.0 if self._last_mono is None else mono - self._last_mono
         self._last_mono = mono
-        sess = db.get_open_session(self.conn)
+        sess = db.get_open_session(self.conn, self.source)
 
         # No streaming app in front: tolerated for a while (app switches, network drops)
         if info is None or info[0] in self.exclude:
@@ -149,9 +257,11 @@ class HistoryRecorder:
         if sess is None:
             if not playing:
                 return None
-            sess = db.open_session(self.conn, app_id, name, logo, now, media_id)
-            log.info("History: session %d opened (%s)", sess["id"], name)
+            sess = db.open_session(self.conn, app_id, name, logo, now, media_id, source=self.source)
+            log.info("History[%s]: session %d opened (%s)", self.source, sess["id"], name)
             self._prev_playing = False  # the previous interval was not playback
+        if hint and hint[0] and not sess["hint_title"]:
+            db.set_hint(self.conn, sess["id"], *hint)
 
         if playing:
             add = gap if self._prev_playing and gap <= MAX_TICK_GAP else 0.0
@@ -182,6 +292,15 @@ class TvPresence:
                 self.history = HistoryRecorder(cfg)
             except Exception as e:  # history must never take the presence down
                 log.warning("History disabled: %s", e)
+        a = {"port": 5555, "ignore_apps": ["com.plexapp.android", "com.spotify.tv.android"], **(cfg.get("androidtv") or {})}
+        self.atv: AndroidTv | None = AndroidTv(a["host"], int(a["port"])) if a.get("host") else None
+        self.atv_ignore = set(a["ignore_apps"])
+        self.atv_history: HistoryRecorder | None = None
+        if self.atv and self.history:
+            try:
+                self.atv_history = HistoryRecorder(cfg, source="androidtv")
+            except Exception as e:
+                log.warning("Android TV history disabled: %s", e)
 
     # ---------- TV ----------
     async def ensure_tv(self) -> bool:
@@ -334,6 +453,21 @@ class TvPresence:
                         ident = self.history.identification(self.history.tick(info, media))
                     except Exception as e:
                         log.warning("History: %s", e)
+                # Android TV box: its own session; shown in Discord when the LG shows nothing
+                if self.atv:
+                    atv_info = atv_media = atv_hint = atv_ident = None
+                    try:
+                        atv_info, atv_media, atv_hint = await asyncio.wait_for(asyncio.to_thread(self.atv.read), 25)
+                    except Exception as e:
+                        log.debug("Android TV: %s", e)
+                    if self.atv_history:
+                        try:
+                            atv_ident = self.atv_history.identification(
+                                self.atv_history.tick(atv_info, atv_media, atv_hint))
+                        except Exception as e:
+                            log.warning("History[androidtv]: %s", e)
+                    if info is None and atv_info and atv_info[0] not in self.atv_ignore:
+                        info, ident = atv_info, atv_ident
                 # reset the timer when the app leaves the foreground
                 active = info[0] if info else None
                 for a in list(self.app_since):

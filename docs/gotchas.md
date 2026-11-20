@@ -39,6 +39,11 @@ Things that cost real debugging time. Check here first.
 - `/status/sessions` includes every account on the server and music; filter by `User.id` and type.
 - The Plex webOS app (`cdp-30`) is ignored by the TV recorder to avoid duplicates.
 
+## Android TV (Mi Box)
+
+- Turning on HDMI-CEC on the box (`settings put global hdmi_control_enabled 1`) while the TV's CEC (LG: SIMPLINK) is **off** left Netflix with **no sound**: the box kept negotiating audio over CEC with a TV that never answered. Turn SIMPLINK on in the TV first, then CEC on the box. A box with no CEC physical address (`0xFFFFFFFF` in `dumpsys hdmi_control`) means the TV is not talking CEC.
+- Netflix registers a media session but with `metadata: null`: state and position only, no title.
+
 ## HBO Max
 
 - There is no watch-history endpoint at all (only *Continue Watching*, ~90 days). The legacy `api.hbo.com` endpoints browser scrobblers used are dead. The TV recorder + dashboard is the workaround.

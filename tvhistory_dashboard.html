@@ -20,6 +20,8 @@ button:disabled{opacity:.5;cursor:default}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 14px}
 .filters button{font-size:13px;padding:5px 10px}
 .filters button.on{background:var(--acc);color:#0b1020;border-color:var(--acc)}
+.tabs{border-bottom:1px solid var(--line);padding-bottom:10px}
+.tabs button{font-size:14px;padding:6px 14px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}
 .now{border-color:#33415f;background:linear-gradient(180deg,#1a2030,#171a21)}
 .now h2{margin:0 0 10px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--acc)}
@@ -81,6 +83,12 @@ button:disabled{opacity:.5;cursor:default}
     <button id="plexImport">Import from Plex</button>
     <button class="pri" id="pushAll">Send pending</button></div>
   </header>
+  <nav class="filters tabs" id="sources">
+    <button data-s="all" class="on">All</button>
+    <button data-s="tv">LG TV</button>
+    <button data-s="androidtv">Android TV</button>
+    <button data-s="plex">Plex</button>
+  </nav>
   <section id="plexNow"></section>
   <section id="now"></section>
   <nav class="filters" id="filters">
@@ -110,7 +118,10 @@ const api = async (path, body) => {
   if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
 };
-let state = null, filter = "all", nowKey = null;
+const SRC = {tv: "LG TV", androidtv: "Android TV", plex: "Plex"};
+let state = null, filter = "all", nowKeys = {};
+let src = (() => { try { return localStorage.getItem("src") || "all"; } catch { return "all"; } })();
+const inSrc = s => src === "all" || (s.source || "tv") === src;
 const toast = (msg, ms = 4200) => { const t = $("#toast"); t.textContent = msg; t.classList.add("on");
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), ms); };
 const hhmm = ts => new Date(ts * 1000).toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"});
@@ -161,7 +172,7 @@ const PLEX_ICON = "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&f
 const clock = t => { t = Math.max(0, Math.round(t)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), x = t % 60;
   return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + ":" + String(x).padStart(2, "0"); };
 function renderPlexNow() {
-  const box = $("#plexNow"), list = state.plex_now || [];
+  const box = $("#plexNow"), list = (src === "all" || src === "plex") ? state.plex_now || [] : [];
   if (!list.length) { box.innerHTML = ""; return; }
   box.innerHTML = list.map(p => {
     const paused = p.state !== "playing";
@@ -192,47 +203,57 @@ function liveChip(p, paused) {
 }
 
 function renderNow() {
-  const s = state.now, box = $("#now");
-  if (!s) { nowKey = null; box.innerHTML = ""; return; }
+  const box = $("#now");
+  const nows = (state.nows || []).filter(inSrc);
+  const live = new Set(nows.map(s => String(s.id)));
+  box.querySelectorAll("[data-now]").forEach(el => { if (!live.has(el.dataset.now)) { el.remove(); delete nowKeys[el.dataset.now]; } });
+  for (const s of nows) renderNowCard(box, s);
+}
+
+function renderNowCard(box, s) {
   const key = `${s.id}|${s.items.map(i => i.id).join(",")}`;
   const paused = state.server_time - s.last_play_at > 12;
-  if (key === nowKey) {   // only refresh counter and state, keep what you are typing
-    $("#nowMins").textContent = mins(s.played_seconds);
-    $("#nowDot").className = "dot" + (paused ? " pause" : "");
-    $("#nowState").textContent = paused ? "paused" : "playing";
+  let card = box.querySelector(`[data-now="${s.id}"]`);
+  if (card && nowKeys[s.id] === key) {   // only refresh counter and state, keep what you are typing
+    $(".nowMins", card).textContent = mins(s.played_seconds);
+    $(".nowDot", card).className = "dot nowDot" + (paused ? " pause" : "");
+    $(".nowState", card).textContent = paused ? "paused" : "playing";
     return;
   }
-  nowKey = key;
+  nowKeys[s.id] = key;
+  if (!card) { card = document.createElement("div"); card.dataset.now = s.id; box.appendChild(card); }
   const it = s.items[s.items.length - 1];
-  box.innerHTML = `<div class="card now"><h2>Now on TV</h2>
+  card.innerHTML = `<div class="card now"><h2>Now on ${SRC[s.source] || "TV"}</h2>
     <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
-      <span id="nowDot" class="dot${paused ? " pause" : ""}"></span>
-      <span class="meta"><span id="nowState">${paused ? "paused" : "playing"}</span> · since ${hhmm(s.started_at)} · <span id="nowMins">${mins(s.played_seconds)}</span></span></div>
-    <div id="nowBody" style="margin-top:12px"></div></div>`;
-  const body = $("#nowBody");
+      <span class="dot nowDot${paused ? " pause" : ""}"></span>
+      <span class="meta"><span class="nowState">${paused ? "paused" : "playing"}</span> · since ${hhmm(s.started_at)} · <span class="nowMins">${mins(s.played_seconds)}</span></span></div>
+    <div class="nowBody" style="margin-top:12px"></div></div>`;
+  const body = $(".nowBody", card);
   if (it) {
     body.innerHTML = `<div class="row">${it.poster ? `<img class="poster big" src="${esc(it.poster)}" alt="">` : ""}
       <div><div class="title">${esc(it.title)}</div><div class="meta">${epLine(it)}</div>
       ${matchChips(it.match)}
       <div class="hint">This is what Discord shows. If the app autoplayed the next one, hit "Next episode".</div>
       <div class="actions">
-        ${it.kind === "episode" ? `<button class="pri" id="nextEp">Next episode</button>` : ""}
-        <button id="nowChange">Change</button></div></div></div>`;
-    $("#nextEp")?.addEventListener("click", async e => {
+        ${it.kind === "episode" ? `<button class="pri nextEp">Next episode</button>` : ""}
+        <button class="nowChange">Change</button></div></div></div>`;
+    $(".nextEp", body)?.addEventListener("click", async e => {
       e.target.disabled = true;
       try { const r = await api(`/api/sessions/${s.id}/next`, {}); toast(`Now: S${r.season} · E${r.episode}`); await refresh(); }
       catch (err) { toast(err.message); e.target.disabled = false; }
     });
-    $("#nowChange").addEventListener("click", () => { body.innerHTML = ""; searchBox(body, s.id, it.title); });
+    $(".nowChange", body).addEventListener("click", () => { body.innerHTML = ""; searchBox(body, s.id, it.title); });
   } else {
-    body.innerHTML = `<div class="meta" style="margin-bottom:8px">What are you watching? Identify it and Discord will show it.</div>`;
-    const wrap = document.createElement("div"); body.appendChild(wrap); searchBox(wrap, s.id, "");
+    body.innerHTML = `<div class="meta" style="margin-bottom:8px">${s.hint_title
+      ? `The device reports <b>${esc(s.hint_title)}</b>. Pick the right match below.`
+      : "What are you watching? Identify it and Discord will show it."}</div>`;
+    const wrap = document.createElement("div"); body.appendChild(wrap); searchBox(wrap, s.id, s.hint_title || "");
   }
 }
 
 function renderList() {
   const list = $("#list");
-  const ss = state.sessions.filter(s => s.state === "closed" && (filter === "all" ? sessKind(s) !== "ignored" : sessKind(s) === filter));
+  const ss = state.sessions.filter(s => s.state === "closed" && inSrc(s) && (filter === "all" ? sessKind(s) !== "ignored" : sessKind(s) === filter));
   if (!ss.length) { list.innerHTML = `<div class="empty">Nothing here.</div>`; return; }
   let html = "", lastDay = null;
   for (const s of ss) {
@@ -243,11 +264,11 @@ function renderList() {
       ${it0?.poster ? `<img class="poster" src="${esc(it0.poster)}" alt="">` : ""}
       <div style="flex:1;min-width:0">
         <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
-          <span class="meta">${hhmm(s.started_at)}–${hhmm(s.ended_at || s.last_seen_at)} · ${mins(s.played_seconds)}</span></div>
+          <span class="meta">${hhmm(s.started_at)}–${hhmm(s.ended_at || s.last_seen_at)} · ${mins(s.played_seconds)}${src === "all" && s.source !== "plex" ? ` · ${SRC[s.source] || "LG TV"}` : ""}</span></div>
         ${s.items.length ? `<div class="title" style="margin-top:6px">${esc(it0.title)}</div>
           <ul class="items">${s.items.map(i => `<li><span class="meta">${epLine(i)}</span><div class="chips">${statusChip("trakt", i)}${statusChip("simkl", i)}</div></li>`).join("")}</ul>`
           : `${s.hint_title ? `<div class="title" style="margin-top:6px">${esc(s.hint_title)}</div>
-             <div class="meta">${s.hint_season != null ? `S${s.hint_season} · E${s.hint_episode} · ` : ""}per ${esc(s.app_name)}, no external IDs found yet</div>` : ""}
+             <div class="meta">${s.hint_season != null ? `S${s.hint_season} · E${s.hint_episode} · ` : ""}${s.source === "plex" ? `per ${esc(s.app_name)}, no external IDs found yet` : "reported by the device"}</div>` : ""}
              <div class="chips"><span class="chip warn">unidentified</span></div>`}
         ${k === "ignored" ? `<div class="chips"><span class="chip">ignored</span></div>` : ""}
         <div class="actions">
@@ -307,6 +328,13 @@ $("#pushAll").addEventListener("click", async e => {
   const b = e.target; b.disabled = true; b.innerHTML = `<span class="spin"></span> Sending…`;
   try { await summarize(await api("/api/push", {})); } catch (err) { toast(err.message); await refresh(); }
 });
+$("#sources").addEventListener("click", e => {
+  const b = e.target.closest("button[data-s]"); if (!b) return;
+  src = b.dataset.s; try { localStorage.setItem("src", src); } catch {}
+  document.querySelectorAll("#sources button").forEach(x => x.classList.toggle("on", x === b));
+  nowKeys = {}; $("#now").innerHTML = ""; renderPlexNow(); renderNow(); renderList();
+});
+document.querySelectorAll("#sources button").forEach(x => x.classList.toggle("on", x.dataset.s === src));
 $("#filters").addEventListener("click", e => {
   const b = e.target.closest("button[data-f]"); if (!b) return;
   filter = b.dataset.f; document.querySelectorAll("#filters button").forEach(x => x.classList.toggle("on", x === b));
@@ -364,7 +392,7 @@ function searchBox(container, sid, initial, hint = {}) {
   if (initial) go(); else setTimeout(() => inp.focus(), 50);
 
   const save = async payload => {
-    try { await api(`/api/sessions/${sid}/identify`, payload); closeModal(); nowKey = null; toast("Saved"); await refresh(); }
+    try { await api(`/api/sessions/${sid}/identify`, payload); closeModal(); nowKeys = {}; toast("Saved"); await refresh(); }
     catch (err) { toast(err.message); }
   };
   const base = x => ({title: x.title, year: x.year, poster: x.poster, tmdb: x.ids.tmdb, imdb: x.ids.imdb, tvdb: x.ids.tvdb});

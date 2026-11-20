@@ -1166,8 +1166,8 @@ def api_next(sid: int) -> dict:
     try:
         conn.execute("UPDATE sessions SET state='closed', ended_at=? WHERE id=? AND state='open'", (now, sid))
         cur = conn.execute(
-            "INSERT INTO sessions(app_id, app_name, app_logo, started_at, last_seen_at, last_play_at)"
-            " VALUES (?,?,?,?,?,?)", (sess["app_id"], sess["app_name"], sess["app_logo"], now, now, now))
+            "INSERT INTO sessions(app_id, app_name, app_logo, started_at, last_seen_at, last_play_at, source)"
+            " VALUES (?,?,?,?,?,?,?)", (sess["app_id"], sess["app_name"], sess["app_logo"], now, now, now, sess["source"]))
         conn.execute(
             "INSERT INTO items(session_id, kind, title, year, season, episode, episode_title, tmdb, tvdb, imdb, poster)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -1200,15 +1200,17 @@ def api_state(days: int) -> dict:
             if left:
                 pending += 1
                 waiting += left == {"not_found"}   # nothing to do until the title is listed
-    now = next((s for s in sessions if s["state"] == "open"), None)
-    if now and now["items"]:
-        it = now["items"][-1]
-        it["match"] = match_badges(it["kind"], {k: it[k] for k in ("imdb", "tmdb", "tvdb") if it[k]})
+    nows = [s for s in sessions if s["state"] == "open"]   # one per device (LG TV, Android TV)
+    for s in nows:
+        if s["items"]:
+            it = s["items"][-1]
+            it["match"] = match_badges(it["kind"], {k: it[k] for k in ("imdb", "tmdb", "tvdb") if it[k]})
+    now = nows[0] if nows else None
     try:
         pnow = plex_now() if CFG["plex"] else []
     except Exception:
         pnow = []
-    return {"now": now, "sessions": sessions, "pending": pending, "waiting": waiting, "server_time": time.time(),
+    return {"now": now, "nows": nows, "sessions": sessions, "pending": pending, "waiting": waiting, "server_time": time.time(),
             "plex": {"enabled": CFG["plex"], **PLEX_STATUS}, "plex_now": pnow}
 
 

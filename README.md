@@ -92,6 +92,16 @@ Only if the connection is refused: look for **LG Connect Apps** (older webOS, un
 
 That is all webOS exposes for third-party apps: **no title, no position, no duration**. Hence the dashboard to identify what was playing. It never sends commands to the TV (no power, volume or input changes).
 
+## Android TV
+
+An Android TV / Google TV box (tested: Xiaomi Mi Box, Android 11) is read over **ADB on the network** with [adb-shell](https://github.com/JeffLIrion/adb_shell), the library Home Assistant uses. It gets its own session (`source = androidtv`) next to the LG, and its own tab in the dashboard.
+
+**On the box, once:** Settings → Device Preferences → About → press *Build* 7 times; then Developer options → **USB debugging** on (on most boxes that also opens ADB on port 5555 over the network). Set `[androidtv] host` to the box's IP and restart `tvpresence`. The first connection shows **"Allow USB debugging?"** on the TV: tick *Always allow from this computer*. The key is saved as `adbkey` in the config dir.
+
+**What it reads:** the foreground app (`dumpsys activity`), the screen state (`dumpsys power`), and the app's **media session** (`dumpsys media_session`): playing/paused, position and, when the app publishes it, **title and subtitle**. That title is stored as a hint and pre-fills the picker. Netflix does not publish a title (only state and position); music apps like Spotify do.
+
+**Discord:** the box's activity is shown when the LG itself has nothing streaming in front (e.g. the LG is on the box's HDMI input). Plex and Spotify on the box are never shown or recorded (DRPP and the Plex importer cover Plex).
+
 ## Discord application
 
 Rich Presence always runs under a Discord *application*, identified by its Application ID (`client_id`). The app itself does almost nothing here: the code overrides the activity name (`Watching HBO Max`) and passes logos and posters as URLs, so the app needs **no** uploaded art and no bot. Its own name only shows up as a fallback.

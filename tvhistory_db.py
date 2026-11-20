@@ -100,7 +100,7 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     # Migrations from older databases (tvpresence and the dashboard may run them at the same time)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
     for col, decl in (("media_id", "TEXT"),
-                      ("source", "TEXT NOT NULL DEFAULT 'tv'"),   # tv | plex
+                      ("source", "TEXT NOT NULL DEFAULT 'tv'"),   # tv (LG) | androidtv | plex
                       ("source_key", "TEXT"),                     # e.g. Plex historyKey
                       ("hint_title", "TEXT"),                     # what the source said, when it could not be identified
                       ("hint_season", "INTEGER"),
@@ -114,18 +114,18 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
-def get_open_session(conn: sqlite3.Connection) -> sqlite3.Row | None:
+def get_open_session(conn: sqlite3.Connection, source: str = "tv") -> sqlite3.Row | None:
     return conn.execute(
-        "SELECT * FROM sessions WHERE state='open' ORDER BY id DESC LIMIT 1"
+        "SELECT * FROM sessions WHERE state='open' AND source=? ORDER BY id DESC LIMIT 1", (source,)
     ).fetchone()
 
 
 def open_session(conn, app_id: str, app_name: str, app_logo: str | None, now: float,
-                 media_id: str | None = None) -> sqlite3.Row:
+                 media_id: str | None = None, source: str = "tv") -> sqlite3.Row:
     cur = conn.execute(
-        "INSERT INTO sessions(app_id, app_name, app_logo, started_at, last_seen_at, last_play_at, media_id)"
-        " VALUES (?,?,?,?,?,?,?)",
-        (app_id, app_name, app_logo, now, now, now, media_id),
+        "INSERT INTO sessions(app_id, app_name, app_logo, started_at, last_seen_at, last_play_at, media_id, source)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (app_id, app_name, app_logo, now, now, now, media_id, source),
     )
     return conn.execute("SELECT * FROM sessions WHERE id=?", (cur.lastrowid,)).fetchone()
 
@@ -148,6 +148,13 @@ def set_media(conn, sid: int, media_id: str) -> None:
     conn.execute("UPDATE sessions SET media_id=? WHERE id=? AND state='open'", (media_id, sid))
 
 
+def set_hint(conn, sid: int, title: str | None, subtitle: str | None = None) -> None:
+    """What the device itself reports as playing (Android media session); pre-fills the picker."""
+    if title:
+        conn.execute("UPDATE sessions SET hint_title=? WHERE id=? AND state='open'",
+                     (title if not subtitle else f"{title} — {subtitle}", sid))
+
+
 def has_items(conn, sid: int) -> bool:
     return conn.execute("SELECT 1 FROM items WHERE session_id=? LIMIT 1", (sid,)).fetchone() is not None
 
@@ -167,13 +174,15 @@ def close_session(conn, sid: int, min_seconds: float, ended_at: float | None = N
     )
 
 
-def recover(conn, min_seconds: float, resume_window: float = 0, now: float | None = None) -> tuple[int, int | None]:
+def recover(conn, min_seconds: float, resume_window: float = 0, now: float | None = None,
+            source: str = "tv") -> tuple[int, int | None]:
     """On startup after a restart: the most recent open session is resumed if it
     was seen less than resume_window ago (the first tick decides whether it is
     still the same app or closes it); the rest are closed. Returns (closed, resumed_id)."""
     import time as _t
     now = _t.time() if now is None else now
-    rows = conn.execute("SELECT id, last_seen_at FROM sessions WHERE state='open' ORDER BY id DESC").fetchall()
+    rows = conn.execute("SELECT id, last_seen_at FROM sessions WHERE state='open' AND source=? ORDER BY id DESC",
+                        (source,)).fetchall()
     keep = rows[0]["id"] if rows and now - rows[0]["last_seen_at"] <= resume_window else None
     closed = 0
     for r in rows:
