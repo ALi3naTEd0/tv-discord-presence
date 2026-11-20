@@ -660,9 +660,50 @@ def plex_resolve(guid: str | None) -> tuple[dict, dict]:
             if st != 200 or not isinstance(j, dict):
                 raise RuntimeError(f"Plex metadata provider {st}")
             return ((j.get("MediaContainer") or {}).get("Metadata") or [{}])[0]
-        md = cached(("plexmd", rk), 7 * 86400, fetch)
-        return guid_ids(md), md
+        try:
+            md = cached(("plexmd", rk), 7 * 86400, fetch)
+        except RuntimeError:
+            md = {}
+        ids = guid_ids(md)
+        if not ids:
+            # The provider can 404 on a GUID Plex just assigned (new titles) while the
+            # local library already holds the external IDs: use those.
+            local = plex_local_guids(guid)
+            ids, md = guid_ids(local), {**local, **md}
+        if not ids:
+            raise RuntimeError("Plex: no external IDs for " + guid)
+        return ids, md
     return guid_ids({"guid": guid}), {}  # old agent: the IDs are in the guid
+
+
+def plex_local_guids(guid: str) -> dict:
+    """External IDs Plex stored in its own library for a GUID (tags of type 314),
+    completed with TMDB external_ids. Empty if the item is no longer in the library."""
+    try:
+        c = sqlite3.connect(Path(CFG["plex_db"]).as_uri() + "?mode=ro", uri=True, timeout=10)
+        try:
+            row = c.execute("SELECT id, title, year FROM metadata_items WHERE guid=? LIMIT 1", (guid,)).fetchone()
+            if not row:
+                return {}
+            tags = [t for (t,) in c.execute(
+                "SELECT t.tag FROM taggings tg JOIN tags t ON t.id=tg.tag_id"
+                " WHERE tg.metadata_item_id=? AND t.tag_type=314", (row[0],))]
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return {}
+    md = {"title": row[1], "year": row[2], "Guid": [{"id": t} for t in tags]}
+    ids = guid_ids(md)
+    if ids.get("tmdb") and not (ids.get("imdb") and ids.get("tvdb")):
+        kind = "movie" if "/movie/" in guid else "tv"
+        try:
+            ext = tmdb(f"/{kind}/{ids['tmdb']}/external_ids")
+            for k, src in (("imdb", "imdb_id"), ("tvdb", "tvdb_id")):
+                if ext.get(src) and k not in ids:
+                    md["Guid"].append({"id": f"{k}://{ext[src]}"})
+        except Exception:
+            pass
+    return md
 
 
 def plex_view_item(v) -> dict | None:

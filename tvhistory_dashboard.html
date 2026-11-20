@@ -234,7 +234,7 @@ function renderList() {
         ${s.items.length ? `<div class="title" style="margin-top:6px">${esc(it0.title)}</div>
           <ul class="items">${s.items.map(i => `<li><span class="meta">${epLine(i)}</span><div class="chips">${statusChip("trakt", i)}${statusChip("simkl", i)}</div></li>`).join("")}</ul>`
           : `${s.hint_title ? `<div class="title" style="margin-top:6px">${esc(s.hint_title)}</div>
-             <div class="meta">${s.hint_season != null ? `S${s.hint_season} · E${s.hint_episode} · ` : ""}per ${esc(s.app_name)}, no longer in the library</div>` : ""}
+             <div class="meta">${s.hint_season != null ? `S${s.hint_season} · E${s.hint_episode} · ` : ""}per ${esc(s.app_name)}, no external IDs found yet</div>` : ""}
              <div class="chips"><span class="chip warn">unidentified</span></div>`}
         ${k === "ignored" ? `<div class="chips"><span class="chip">ignored</span></div>` : ""}
         <div class="actions">
