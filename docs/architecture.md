@@ -57,6 +57,8 @@ Stdlib HTTP server bound to `127.0.0.1:7790`. POST endpoints require `Content-Ty
 - **Import** (`plex_loop`, every `plex_interval` s): reads `metadata_item_views` from the Plex library DB (falls back to the HTTP history). Those rows keep the `guid`/`grandparent_guid` even after the file is deleted from disk, and the GUID resolves through `metadata.provider.plex.tv` to IMDb/TMDB/TVDB, so items arrive already identified. Runtime comes from the provider, falling back to TMDB.
 - **Dedupe**: before pushing a Plex-sourced item to Trakt, the dashboard checks whether trakt-scrobbler already recorded it.
 - **Now on Plex**: `/status/sessions` filtered to `plex_account_id` (and optionally `plex_user`), movies and episodes only, with real position, duration, state and player. Cached 3 s.
+- **Match chips** on both now-playing cards: `Trakt ✓/✗`, `Simkl ✓/✗` = the title exists on that service (by external ID, cached 1 h), so a scrobble or push can land. On Plex, `● scrobbling to Trakt` appears when Trakt's `/users/me/watching` shows the same title, i.e. trakt-scrobbler is live.
+- **Local ID fallback**: if Plex's metadata provider 404s on a new GUID, the IDs come from the library's own `tags` (type 314), completed with TMDB `external_ids`.
 
 ## Services
 

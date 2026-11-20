@@ -35,6 +35,7 @@ Things that cost real debugging time. Check here first.
 ## Plex
 
 - `metadata_item_views` keeps `guid`/`grandparent_guid` after files are deleted; resolve with `https://metadata.provider.plex.tv/library/metadata/<id>` to get IMDb/TMDB/TVDB. That is why the importer runs every few minutes: it survives deletions, but the HTTP history alone does not.
+- Brand-new titles can get a Plex GUID that `metadata.provider.plex.tv` still 404s, and episodes that only carry a `tmdb://` ID (no TVDB/IMDb). Simkl's Plex webhook then fails to match them silently; refreshing the show's metadata in Plex later usually fills the missing IDs.
 - `/status/sessions` includes every account on the server and music; filter by `User.id` and type.
 - The Plex webOS app (`cdp-30`) is ignored by the TV recorder to avoid duplicates.
 

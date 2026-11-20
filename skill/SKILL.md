@@ -35,7 +35,7 @@ Repo: `~/tv-discord-presence` (GitHub `ALi3naTEd0/tv-discord-presence`). Full do
 Local `http://127.0.0.1:7790`; from phone/other devices the tailnet URL on port 8444 (see `local.md`). UI is English, refreshes every 5 s.
 
 - **Header buttons:** *Check Trakt/Simkl* (verify, read-only) · *Import from Plex* · *Send pending (N)* (writes — only with the user's OK).
-- **Now on Plex** card: poster, playing/paused, device, real position bar, minutes left. Account 1 only.
+- **Now on Plex** card: poster, playing/paused, device, real position bar, minutes left, `Trakt ✓ / Simkl ✓` match chips and `● scrobbling to Trakt` when trakt-scrobbler is live. Account 1 only. The Now on TV card shows the same match chips once identified.
 - **Now on TV** card: app + state + played minutes. Unidentified → inline search box. Identified → what Discord shows, plus *Next episode* (split when the app autoplayed the next one) and *Change*.
 - **Filters:** All · Unidentified · Pending · Sent · Ignored. Sessions grouped by day.
 - **Per-session chips** per service: `unchecked`, `to send` (exists there, not in history), `✓`, `✓ already there`, `not listed yet` (title missing on that service), `error` (hover for the message).

@@ -861,7 +861,7 @@ def plex_now() -> list:
                 try:
                     md = cached(("plexlocal", key), 3600, lambda k=key: (
                         plex_get(f"/library/metadata/{k}?includeGuids=1").get("Metadata") or [{}])[0])
-                    ids = guid_ids(md)
+                    ids = guid_ids(md) or (plex_resolve(md.get("guid"))[0] if md.get("guid") else {})
                     if not ep:
                         ids.pop("tvdb", None)
                     if ids.get("tmdb"):
@@ -882,9 +882,41 @@ def plex_now() -> list:
                 "state": pl.get("state") or "playing",
                 "device": pl.get("title") or pl.get("product") or "",
                 "poster": poster, "ids": ids,
+                "match": match_badges("episode" if ep else "movie", ids),
+                "trakt_watching": trakt_watching(),
             })
         return out
     return cached(("plexnow",), 3, fetch)
+
+
+def match_badges(kind: str, ids: dict) -> dict:
+    """Does the title exist on Trakt / Simkl (so a scrobble can land)? True / False / None (unknown). Cached 1 h."""
+    if not ids:
+        return {"trakt": None, "simkl": None}
+    rec = {"kind": "movie" if kind == "movie" else "tv", "ids": ids}
+    out = {}
+    for svc, fn in (("trakt", exists_trakt), ("simkl", exists_simkl)):
+        try:
+            v = cached(("exists", svc, rec["kind"], json.dumps(ids, sort_keys=True)), 3600, lambda f=fn: f(rec))
+        except Exception:
+            v = None
+        out[svc] = None if v is None else bool(v)
+    return out
+
+
+def trakt_watching() -> dict | None:
+    """What Trakt shows as being watched right now (i.e. trakt-scrobbler is scrobbling). Cached 30 s."""
+    def fetch():
+        st, j = http_json("GET", "https://api.trakt.tv/users/me/watching", trakt_headers(True))
+        if st != 200 or not isinstance(j, dict):
+            return None  # 204 = nothing
+        m = j.get("movie") or j.get("show") or {}
+        e = j.get("episode") or {}
+        return {"title": m.get("title"), "season": e.get("season"), "episode": e.get("number"), "ids": m.get("ids", {})}
+    try:
+        return cached(("trakt_watching",), 30, fetch)
+    except Exception:
+        return None
 
 
 def plex_loop() -> None:
@@ -1169,6 +1201,9 @@ def api_state(days: int) -> dict:
                 pending += 1
                 waiting += left == {"not_found"}   # nothing to do until the title is listed
     now = next((s for s in sessions if s["state"] == "open"), None)
+    if now and now["items"]:
+        it = now["items"][-1]
+        it["match"] = match_badges(it["kind"], {k: it[k] for k in ("imdb", "tmdb", "tvdb") if it[k]})
     try:
         pnow = plex_now() if CFG["plex"] else []
     except Exception:

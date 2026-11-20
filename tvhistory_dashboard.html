@@ -173,10 +173,22 @@ function renderPlexNow() {
           <span class="meta">${paused ? "paused" : "playing"}${p.device ? " · " + esc(p.device) : ""}</span></div>
         <div class="title" style="margin-top:8px">${esc(p.title)}</div>
         <div class="meta">${epLine(p)}</div>
+        ${matchChips(p.match, liveChip(p, paused))}
         ${p.duration ? `<div class="bar"><span style="width:${pct.toFixed(1)}%"></span></div>
           <div class="meta" style="margin-top:4px">${clock(p.offset)} / ${clock(p.duration)} · ${Math.round((p.duration - p.offset) / 60)} min left</div>` : ""}
       </div></div></div>`;
   }).join("");
+}
+
+// Trakt / Simkl ✓ = the title exists there, so a scrobble or push can land
+const matchChips = (m, extra = "") => m
+  ? `<div class="chips">${existsChip("Trakt", m.trakt)}${existsChip("Simkl", m.simkl)}${extra}</div>` : "";
+function liveChip(p, paused) {
+  const w = p.trakt_watching;
+  const same = w && ((w.ids?.tmdb && w.ids.tmdb === p.ids?.tmdb) || w.title === p.title);
+  if (same) return `<span class="chip ok" title="trakt-scrobbler is scrobbling this right now">● scrobbling to Trakt</span>`;
+  if (!paused && p.offset > 90) return `<span class="chip" title="Trakt shows nothing being watched">not scrobbling to Trakt</span>`;
+  return "";
 }
 
 function renderNow() {
@@ -201,6 +213,7 @@ function renderNow() {
   if (it) {
     body.innerHTML = `<div class="row">${it.poster ? `<img class="poster big" src="${esc(it.poster)}" alt="">` : ""}
       <div><div class="title">${esc(it.title)}</div><div class="meta">${epLine(it)}</div>
+      ${matchChips(it.match)}
       <div class="hint">This is what Discord shows. If the app autoplayed the next one, hit "Next episode".</div>
       <div class="actions">
         ${it.kind === "episode" ? `<button class="pri" id="nextEp">Next episode</button>` : ""}
