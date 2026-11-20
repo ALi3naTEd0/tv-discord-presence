@@ -1,0 +1,32 @@
+# config.toml in the tvpresence config dir (Linux ~/.config/tvpresence; see README → Platforms)
+
+tv_host = "192.168.1.220"          # LG TV IP (pin it in your router's DHCP)
+client_id = ""                     # Discord Application ID: your own app, or DRPP's "413407336082833418" (see README)
+poll_seconds = 5
+ignore_apps = ["cdp-30"]           # Plex app on webOS: covered by the Plex importer / DRPP
+only_known = false
+show_when_browsing = false
+
+[history]                          # every key is optional
+# --- capture (tvpresence.py) ---
+# enabled          = true
+# exclude_apps     = ["youtube.leanback.v4", "tv.twitch.tv.starshot.lg"]
+# min_seconds      = 120           # shorter sessions are dropped (trailers, menu autoplay)
+# pause_timeout    = 1800          # paused/in menus longer than this closes the session
+# close_grace      = 60            # no streaming app in front (TV off, other input) closes it
+# resume_window    = 600           # after a restart, resume the open session if seen this recently
+# --- dashboard (tvhistory_dashboard.py) ---
+# dashboard_bind   = "127.0.0.1"   # keep it local; expose with `tailscale serve`, never Funnel
+# dashboard_port   = 7790
+# tmdb_language    = "en-US"
+# plex_enabled     = true
+# plex_url         = "http://127.0.0.1:32400"
+# plex_account_id  = 1             # 1 = server owner
+# plex_user        = ""            # optional extra match on the account name
+# plex_interval    = 300           # seconds between Plex imports
+# plex_import_days = 7             # look-back window on the first import
+# plex_db          = ""            # default depends on the OS (see README → Platforms)
+# --- credentials ---
+# env_files        = []            # extra .env files with TMDB_API_KEY / PLEX_TOKEN (the config dir's .env is always read)
+# trakt_python     = ""            # trakt-scrobbler venv python; auto-detected via `pipx environment`
+# simkl_dir        = "~/.config/simkl"   # holds .env (SIMKL_CLIENT_ID) and token.json

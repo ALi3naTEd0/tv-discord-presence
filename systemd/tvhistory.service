@@ -1,0 +1,12 @@
+[Unit]
+Description=TV History Dashboard (LG/Plex watch history -> Trakt/Simkl)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -u %h/tv-discord-presence/tvhistory_dashboard.py
+WorkingDirectory=%h/tv-discord-presence
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

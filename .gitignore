@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+key
+config.toml
+.env
+# personal watch-history output of tvsync_reconcile.py
+reconcile/
+skill/local.md

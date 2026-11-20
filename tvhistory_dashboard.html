@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV History</title>
+<style>
+:root{--bg:#0f1115;--card:#171a21;--card2:#1e222b;--line:#2a2f3a;--tx:#e8eaf0;--mut:#9aa3b2;
+--acc:#7aa2ff;--ok:#3ecf8e;--warn:#f0b54d;--bad:#ff6b6b;--r:12px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;margin-bottom:12px}
+h1{font-size:20px;margin:0}
+.sub{color:var(--mut);font-size:13px}
+button{background:var(--card2);color:var(--tx);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font:inherit;font-size:14px;cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.pri{background:var(--acc);border-color:var(--acc);color:#0b1020;font-weight:600}
+button:disabled{opacity:.5;cursor:default}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 14px}
+.filters button{font-size:13px;padding:5px 10px}
+.filters button.on{background:var(--acc);color:#0b1020;border-color:var(--acc)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px}
+.now{border-color:#33415f;background:linear-gradient(180deg,#1a2030,#171a21)}
+.now h2{margin:0 0 10px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--acc)}
+.row{display:flex;gap:12px;align-items:flex-start}
+.app{display:flex;align-items:center;gap:8px;font-weight:600}
+.app img{width:22px;height:22px;border-radius:5px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block;box-shadow:0 0 8px var(--ok)}
+.dot.pause{background:var(--warn);box-shadow:none}
+.poster{width:64px;min-width:64px;aspect-ratio:2/3;border-radius:8px;object-fit:cover;background:var(--card2)}
+.poster.big{width:92px;min-width:92px}
+.title{font-weight:600}
+.meta{color:var(--mut);font-size:13px}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.chip{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--card2);border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+.chip.ok{color:var(--ok);border-color:#24584a}
+.chip.warn{color:var(--warn);border-color:#5e4a22}
+.chip.bad{color:var(--bad);border-color:#5e2a2a}
+.chip.ready{color:var(--acc);border-color:#33415f}
+.bar{height:6px;background:#0c0e12;border-radius:99px;overflow:hidden;margin-top:12px}
+.bar span{display:block;height:100%;background:var(--acc);border-radius:99px}
+.chip.src{color:var(--tx)}
+.actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.actions button{font-size:13px;padding:5px 10px}
+.day{color:var(--mut);font-size:13px;margin:18px 2px 8px;text-transform:capitalize}
+.items{margin:6px 0 0;padding:0;list-style:none}
+.items li{font-size:14px}
+.search>input,.manual input,.manual select,.picker select,.picker input:not([type=checkbox]){width:100%;background:#0c0e12;color:var(--tx);border:1px solid var(--line);border-radius:9px;padding:10px 12px;font:inherit}
+.search>input:focus{outline:none;border-color:var(--acc)}
+.results{margin-top:10px;display:grid;gap:8px}
+.res{display:flex;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--card2);cursor:pointer;text-align:left}
+.res:hover{border-color:var(--acc)}
+.res p{margin:4px 0 0;color:var(--mut);font-size:12px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.hint{color:var(--mut);font-size:13px;margin-top:8px}
+.picker{margin-top:10px;display:grid;gap:8px}
+.eps{display:grid;gap:4px;max-height:320px;overflow:auto;padding:2px}
+.eps label{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;background:#12151b;font-size:14px;cursor:pointer}
+.eps input[type=checkbox]{width:16px;height:16px;margin:0;flex:none;accent-color:var(--acc)}
+.eps label span{color:var(--mut);font-size:12px;margin-left:auto}
+.manual{margin-top:12px}
+.manual summary{color:var(--mut);font-size:13px;cursor:pointer}
+.manual form{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.manual form .full{grid-column:1/-1}
+.modal{position:fixed;inset:0;background:#0009;display:none;align-items:flex-start;justify-content:center;padding:4vh 12px;overflow:auto;z-index:10}
+.modal.on{display:flex}
+.modal .card{width:100%;max-width:640px}
+.modal header{margin-bottom:6px}
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#222838;border:1px solid var(--line);padding:10px 14px;border-radius:10px;max-width:92vw;display:none;z-index:20;font-size:14px;white-space:pre-line}
+.toast.on{display:block}
+.empty{color:var(--mut);text-align:center;padding:24px}
+.spin{display:inline-block;width:14px;height:14px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:s 1s linear infinite;vertical-align:-2px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>TV History</h1><div class="sub" id="stats">loading…</div></div>
+    <div class="actions" style="margin:0"><button id="verify">Check Trakt/Simkl</button>
+    <button id="plexImport">Import from Plex</button>
+    <button class="pri" id="pushAll">Send pending</button></div>
+  </header>
+  <section id="plexNow"></section>
+  <section id="now"></section>
+  <nav class="filters" id="filters">
+    <button data-f="all" class="on">All</button>
+    <button data-f="unid">Unidentified</button>
+    <button data-f="pending">Pending</button>
+    <button data-f="sent">Sent</button>
+    <button data-f="ignored">Ignored</button>
+  </nav>
+  <section id="list"></section>
+</main>
+
+<div class="modal" id="modal"><div class="card">
+  <header><div class="title" id="mTitle">Identify</div><button id="mClose">Close</button></header>
+  <div id="mBody"></div>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (path, body) => {
+  const opt = body === undefined ? {} :
+    {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+};
+let state = null, filter = "all", nowKey = null;
+const toast = (msg, ms = 4200) => { const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), ms); };
+const hhmm = ts => new Date(ts * 1000).toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"});
+const mins = s => `${Math.max(0, Math.round(s / 60))} min`;
+const dayLabel = ts => {
+  const d = new Date(ts * 1000), t = new Date(); t.setHours(0,0,0,0);
+  const x = new Date(d); x.setHours(0,0,0,0);
+  const diff = Math.round((t - x) / 864e5);
+  if (diff === 0) return "Today"; if (diff === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, {weekday: "short", day: "numeric", month: "short"});
+};
+const epLine = it => it.kind === "episode"
+  ? `S${it.season} · E${it.episode}${it.episode_title ? " — " + esc(it.episode_title) : ""}`
+  : (it.year ? `Movie · ${it.year}` : "Movie");
+const ST = {
+  pending: ["", "unchecked"], ready: ["ready", "to send"], added: ["ok", "✓"], skipped: ["ok", "✓ already there"],
+  not_found: ["warn", "not listed yet"], error: ["bad", "error"],
+};
+const statusChip = (svc, it) => {
+  const s = it[`${svc}_status`], [cls, txt] = ST[s] || ["", s];
+  const err = it[`${svc}_error`];
+  return `<span class="chip ${cls}" ${err ? `title="${esc(err)}"` : ""}>${svc === "trakt" ? "Trakt" : "Simkl"} ${txt}</span>`;
+};
+const sessKind = s => {
+  if (s.ignored) return "ignored";
+  if (!s.items.length) return "unid";
+  const done = s.items.every(i => ["added", "skipped"].includes(i.trakt_status) && ["added", "skipped"].includes(i.simkl_status));
+  return done ? "sent" : "pending";
+};
+
+async function refresh() {
+  state = await api("/api/state?days=60");
+  renderHeader(); renderPlexNow(); renderNow(); renderList();
+}
+function renderHeader() {
+  const n = state.sessions.filter(s => s.state === "closed").length;
+  const unid = state.sessions.filter(s => sessKind(s) === "unid").length;
+  const px = state.plex || {};
+  const plexTxt = !px.enabled ? "" : px.error ? ` · Plex: ${px.error}`
+    : px.last_run ? ` · Plex checked ${hhmm(px.last_run)}` : "";
+  $("#stats").textContent = `${n} sessions (60 days) · ${unid} unidentified · ${state.pending} pending${state.waiting ? ` (${state.waiting} not listed yet)` : ""}${plexTxt}`;
+  $("#plexImport").style.display = px.enabled ? "" : "none";
+  const b = $("#pushAll"); b.textContent = state.pending ? `Send pending (${state.pending})` : "Nothing pending";
+  b.disabled = !state.pending;
+}
+
+const PLEX_ICON = "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=https://www.plex.tv&size=256";
+const clock = t => { t = Math.max(0, Math.round(t)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), x = t % 60;
+  return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + ":" + String(x).padStart(2, "0"); };
+function renderPlexNow() {
+  const box = $("#plexNow"), list = state.plex_now || [];
+  if (!list.length) { box.innerHTML = ""; return; }
+  box.innerHTML = list.map(p => {
+    const paused = p.state !== "playing";
+    const pct = p.duration ? Math.min(100, p.offset / p.duration * 100) : 0;
+    return `<div class="card now"><h2>Now on Plex</h2><div class="row">
+      ${p.poster ? `<img class="poster big" src="${esc(p.poster)}" alt="">` : ""}
+      <div style="flex:1;min-width:0">
+        <div class="app"><img src="${PLEX_ICON}" alt="">Plex <span class="dot${paused ? " pause" : ""}"></span>
+          <span class="meta">${paused ? "paused" : "playing"}${p.device ? " · " + esc(p.device) : ""}</span></div>
+        <div class="title" style="margin-top:8px">${esc(p.title)}</div>
+        <div class="meta">${epLine(p)}</div>
+        ${p.duration ? `<div class="bar"><span style="width:${pct.toFixed(1)}%"></span></div>
+          <div class="meta" style="margin-top:4px">${clock(p.offset)} / ${clock(p.duration)} · ${Math.round((p.duration - p.offset) / 60)} min left</div>` : ""}
+      </div></div></div>`;
+  }).join("");
+}
+
+function renderNow() {
+  const s = state.now, box = $("#now");
+  if (!s) { nowKey = null; box.innerHTML = ""; return; }
+  const key = `${s.id}|${s.items.map(i => i.id).join(",")}`;
+  const paused = state.server_time - s.last_play_at > 12;
+  if (key === nowKey) {   // only refresh counter and state, keep what you are typing
+    $("#nowMins").textContent = mins(s.played_seconds);
+    $("#nowDot").className = "dot" + (paused ? " pause" : "");
+    $("#nowState").textContent = paused ? "paused" : "playing";
+    return;
+  }
+  nowKey = key;
+  const it = s.items[s.items.length - 1];
+  box.innerHTML = `<div class="card now"><h2>Now on TV</h2>
+    <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
+      <span id="nowDot" class="dot${paused ? " pause" : ""}"></span>
+      <span class="meta"><span id="nowState">${paused ? "paused" : "playing"}</span> · since ${hhmm(s.started_at)} · <span id="nowMins">${mins(s.played_seconds)}</span></span></div>
+    <div id="nowBody" style="margin-top:12px"></div></div>`;
+  const body = $("#nowBody");
+  if (it) {
+    body.innerHTML = `<div class="row">${it.poster ? `<img class="poster big" src="${esc(it.poster)}" alt="">` : ""}
+      <div><div class="title">${esc(it.title)}</div><div class="meta">${epLine(it)}</div>
+      <div class="hint">This is what Discord shows. If the app autoplayed the next one, hit "Next episode".</div>
+      <div class="actions">
+        ${it.kind === "episode" ? `<button class="pri" id="nextEp">Next episode</button>` : ""}
+        <button id="nowChange">Change</button></div></div></div>`;
+    $("#nextEp")?.addEventListener("click", async e => {
+      e.target.disabled = true;
+      try { const r = await api(`/api/sessions/${s.id}/next`, {}); toast(`Now: S${r.season} · E${r.episode}`); await refresh(); }
+      catch (err) { toast(err.message); e.target.disabled = false; }
+    });
+    $("#nowChange").addEventListener("click", () => { body.innerHTML = ""; searchBox(body, s.id, it.title); });
+  } else {
+    body.innerHTML = `<div class="meta" style="margin-bottom:8px">What are you watching? Identify it and Discord will show it.</div>`;
+    const wrap = document.createElement("div"); body.appendChild(wrap); searchBox(wrap, s.id, "");
+  }
+}
+
+function renderList() {
+  const list = $("#list");
+  const ss = state.sessions.filter(s => s.state === "closed" && (filter === "all" ? sessKind(s) !== "ignored" : sessKind(s) === filter));
+  if (!ss.length) { list.innerHTML = `<div class="empty">Nothing here.</div>`; return; }
+  let html = "", lastDay = null;
+  for (const s of ss) {
+    const d = dayLabel(s.started_at);
+    if (d !== lastDay) { html += `<div class="day">${d}</div>`; lastDay = d; }
+    const k = sessKind(s), it0 = s.items[0];
+    html += `<div class="card" data-id="${s.id}"><div class="row">
+      ${it0?.poster ? `<img class="poster" src="${esc(it0.poster)}" alt="">` : ""}
+      <div style="flex:1;min-width:0">
+        <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
+          <span class="meta">${hhmm(s.started_at)}–${hhmm(s.ended_at || s.last_seen_at)} · ${mins(s.played_seconds)}</span></div>
+        ${s.items.length ? `<div class="title" style="margin-top:6px">${esc(it0.title)}</div>
+          <ul class="items">${s.items.map(i => `<li><span class="meta">${epLine(i)}</span><div class="chips">${statusChip("trakt", i)}${statusChip("simkl", i)}</div></li>`).join("")}</ul>`
+          : `${s.hint_title ? `<div class="title" style="margin-top:6px">${esc(s.hint_title)}</div>
+             <div class="meta">${s.hint_season != null ? `S${s.hint_season} · E${s.hint_episode} · ` : ""}per ${esc(s.app_name)}, no longer in the library</div>` : ""}
+             <div class="chips"><span class="chip warn">unidentified</span></div>`}
+        ${k === "ignored" ? `<div class="chips"><span class="chip">ignored</span></div>` : ""}
+        <div class="actions">
+          <button data-a="identify">${s.items.length ? "Change" : "Identify"}</button>
+          ${s.items.length && k === "pending" ? `<button data-a="push">Send</button>` : ""}
+          <button data-a="ignore">${s.ignored ? "Restore" : "Ignore"}</button>
+          <button data-a="delete">Delete</button>
+        </div></div></div></div>`;
+  }
+  list.innerHTML = html;
+}
+
+$("#list").addEventListener("click", async e => {
+  const b = e.target.closest("button[data-a]"); if (!b) return;
+  const id = +b.closest(".card").dataset.id, s = state.sessions.find(x => x.id === id), a = b.dataset.a;
+  try {
+    if (a === "identify") return openModal(s);
+    if (a === "push") { b.disabled = true; b.innerHTML = `<span class="spin"></span>`; return summarize(await api("/api/push", {session_ids: [id]})); }
+    if (a === "ignore") await api(`/api/sessions/${id}/ignore`, {ignored: !s.ignored});
+    if (a === "delete") {
+      if (s.items.some(i => i.trakt_status === "added" || i.simkl_status === "added")
+          && !confirm("Already sent. Deleting it here does NOT remove it from Trakt/Simkl. Delete?")) return;
+      if (!s.items.length && !confirm("Delete this session?")) return;
+      await api(`/api/sessions/${id}/delete`, {});
+    }
+    await refresh();
+  } catch (err) { toast(err.message); await refresh(); }
+});
+
+function summarize(r) {
+  const res = r.results || [];
+  if (!res.length) { toast("Nothing to send"); return refresh(); }
+  const c = {}; res.forEach(x => c[x.status] = (c[x.status] || 0) + 1);
+  const lines = [`${c.added || 0} sent`, c.not_found ? `${c.not_found} not listed yet` : "",
+    c.skipped ? `${c.skipped} already there` : "", c.error ? `${c.error} failed` : ""].filter(Boolean);
+  const errs = res.filter(x => x.status === "error").slice(0, 2).map(x => `${x.target}: ${x.error}`);
+  toast(lines.join(" · ") + (errs.length ? "\n" + errs.join("\n") : ""), 7000);
+  return refresh();
+}
+$("#verify").addEventListener("click", async e => {
+  const b = e.target; b.disabled = true; b.innerHTML = `<span class="spin"></span> Checking…`;
+  try {
+    const r = await api("/api/verify", {});
+    const fmt = (svc, c) => c.error ? `${svc}: ${c.error}` :
+      `${svc}: ${c.added || 0} already there · ${c.ready || 0} to send${c.not_found ? ` · ${c.not_found} not listed yet` : ""}`;
+    toast(r.checked ? `${fmt("Trakt", r.counts.trakt)}\n${fmt("Simkl", r.counts.simkl)}` : "Nothing to check", 7000);
+  } catch (err) { toast(err.message); }
+  b.disabled = false; b.textContent = "Check Trakt/Simkl"; await refresh();
+});
+$("#plexImport").addEventListener("click", async e => {
+  const b = e.target; b.disabled = true; b.innerHTML = `<span class="spin"></span>`;
+  try { const r = await api("/api/plex/import", {}); toast(r.imported ? `${r.imported} new from Plex` : "Nothing new on Plex"); }
+  catch (err) { toast(err.message); }
+  b.disabled = false; b.textContent = "Import from Plex"; await refresh();
+});
+$("#pushAll").addEventListener("click", async e => {
+  const b = e.target; b.disabled = true; b.innerHTML = `<span class="spin"></span> Sending…`;
+  try { await summarize(await api("/api/push", {})); } catch (err) { toast(err.message); await refresh(); }
+});
+$("#filters").addEventListener("click", e => {
+  const b = e.target.closest("button[data-f]"); if (!b) return;
+  filter = b.dataset.f; document.querySelectorAll("#filters button").forEach(x => x.classList.toggle("on", x === b));
+  renderList();
+});
+
+// ------------------------------------------------------------------ search
+const existsChip = (name, v) => v === null || v === undefined
+  ? `<span class="chip">${name} ?</span>`
+  : v ? `<span class="chip ok">${name} ✓</span>` : `<span class="chip warn">${name} ✗</span>`;
+
+function searchBox(container, sid, initial, hint = {}) {
+  container.innerHTML = `<div class="search">
+    <input placeholder="Search a title, or paste an IMDb, TMDB or TheTVDB link/ID" value="${esc(initial)}">
+    <div class="results"></div><div class="pick"></div>
+    <details class="manual"><summary>Not listed anywhere: manual entry</summary>
+      <form>
+        <select name="kind" class="full"><option value="tv">Series</option><option value="movie">Movie</option></select>
+        <input name="title" class="full" placeholder="Title" required>
+        <input name="year" type="number" placeholder="Year">
+        <input name="imdb" placeholder="IMDb (tt…)">
+        <input name="tvdb" type="number" placeholder="TheTVDB id">
+        <input name="tmdb" type="number" placeholder="TMDB id">
+        <input name="season" type="number" placeholder="Season">
+        <input name="episodes" placeholder="Episode(s): 1, 2">
+        <button class="pri full">Save</button>
+      </form></details></div>`;
+  const inp = $("input", container), out = $(".results", container), pick = $(".pick", container);
+  let t, seq = 0;
+  const go = async () => {
+    const q = inp.value.trim(); pick.innerHTML = "";
+    if (q.length < 2) { out.innerHTML = ""; return; }
+    const my = ++seq; out.innerHTML = `<div class="hint"><span class="spin"></span> Searching TMDB, IMDb, Trakt and Simkl…</div>`;
+    try {
+      const r = await api(`/api/search?q=${encodeURIComponent(q)}`);
+      if (my !== seq) return;
+      if (!r.results.length) { out.innerHTML = `<div class="hint">No results${r.errors.length ? " (" + esc(r.errors.join("; ")) + ")" : ""}. Try another title, the IMDb ID, or manual entry.</div>`; return; }
+      out.innerHTML = r.results.map((x, i) => `<button class="res" data-i="${i}">
+        ${x.poster ? `<img class="poster" src="${esc(x.poster)}" alt="" loading="lazy">` : `<div class="poster"></div>`}
+        <div style="min-width:0"><div class="title">${esc(x.title)} ${x.year ? `<span class="meta">(${x.year})</span>` : ""}</div>
+        <div class="chips"><span class="chip src">${esc(x.label)}</span>
+          ${x.src.includes("tmdb") ? `<span class="chip src">TMDB</span>` : ""}${x.src.includes("imdb") ? `<span class="chip src">IMDb</span>` : ""}
+          ${existsChip("Trakt", x.exists.trakt)}${existsChip("Simkl", x.exists.simkl)}</div>
+        ${x.overview ? `<p>${esc(x.overview)}</p>` : ""}</div></button>`).join("") +
+        (r.errors.length ? `<div class="hint">Warnings: ${esc(r.errors.join("; "))}</div>` : "");
+      out.onclick = e => {
+        const b = e.target.closest(".res"); if (!b) return;
+        if (b.style.display === "none") return;
+        choose(r.results[+b.dataset.i], +b.dataset.i);
+      };
+    } catch (err) { if (my === seq) out.innerHTML = `<div class="hint">${esc(err.message)}</div>`; }
+  };
+  inp.addEventListener("input", () => { clearTimeout(t); t = setTimeout(go, 450); });
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") { clearTimeout(t); go(); } });
+  if (initial) go(); else setTimeout(() => inp.focus(), 50);
+
+  const save = async payload => {
+    try { await api(`/api/sessions/${sid}/identify`, payload); closeModal(); nowKey = null; toast("Saved"); await refresh(); }
+    catch (err) { toast(err.message); }
+  };
+  const base = x => ({title: x.title, year: x.year, poster: x.poster, tmdb: x.ids.tmdb, imdb: x.ids.imdb, tvdb: x.ids.tvdb});
+  const focusPick = () => requestAnimationFrame(() => pick.scrollIntoView({behavior: "smooth", block: "start"}));
+  async function choose(x, idx) {
+    // Keep only the chosen result above the picker (otherwise the picker ends up off-screen)
+    out.querySelectorAll(".res").forEach(b => { b.style.display = +b.dataset.i === idx ? "" : "none"; });
+    out.querySelector(".back")?.remove();
+    const back = document.createElement("button");
+    back.className = "back"; back.textContent = "← other results";
+    back.onclick = () => { out.querySelectorAll(".res").forEach(b => b.style.display = ""); back.remove(); pick.innerHTML = ""; };
+    out.appendChild(back);
+    const missing = [x.exists.trakt === false ? "Trakt" : "", x.exists.simkl === false ? "Simkl" : ""].filter(Boolean);
+    const warn = missing.length ? `<div class="hint">⚠ Not on ${missing.join(" or ")} yet: it stays saved and is retried with "Send pending".</div>` : "";
+    if (x.kind === "movie") {
+      pick.innerHTML = `<div class="picker">${warn}<button class="pri">Assign "${esc(x.title)}"</button></div>`;
+      $("button", pick).onclick = () => save({kind: "movie", ...base(x)});
+      focusPick();
+      return;
+    }
+    if (!x.ids.tmdb) {   // series only on IMDb: season/episode by hand
+      pick.innerHTML = `<div class="picker">${warn}<div class="hint">Not on TMDB, so there is no episode list.</div>
+        <input type="number" placeholder="Season" class="s"><input placeholder="Episode(s): 1, 2" class="e">
+        <button class="pri">Assign</button></div>`;
+      $("button", pick).onclick = () => save({kind: "tv", ...base(x), season: +$(".s", pick).value,
+        episodes: $(".e", pick).value.split(/[ ,]+/).filter(Boolean).map(Number)});
+      focusPick();
+      return;
+    }
+    pick.innerHTML = `<div class="hint"><span class="spin"></span> Loading seasons…</div>`;
+    focusPick();
+    try {
+      const {seasons} = await api(`/api/tmdb/tv/${x.ids.tmdb}`);
+      const regular = seasons.filter(s => s.number > 0);
+      const first = seasons.find(z => z.number === hint.season) || regular[0] || seasons[0];
+      pick.innerHTML = `<div class="picker">${warn}<div class="title">${esc(x.title)}</div>
+        <select class="season">${seasons.map(s => `<option value="${s.number}" ${s.number === first.number ? "selected" : ""}>${esc(s.name || "Season " + s.number)} (${s.count})</option>`).join("")}</select>
+        <div class="eps"></div><button class="pri" disabled>Pick episode(s)</button></div>`;
+      const sel = $(".season", pick), eps = $(".eps", pick), btn = $("button", pick);
+      const load = async () => {
+        eps.innerHTML = `<div class="hint"><span class="spin"></span></div>`;
+        const {episodes} = await api(`/api/tmdb/tv/${x.ids.tmdb}/season/${sel.value}`);
+        eps.innerHTML = episodes.map(e => `<label><input type="checkbox" value="${e.number}">
+          E${e.number} · ${esc(e.name || "")}<span>${e.runtime ? e.runtime + " min" : ""}</span></label>`).join("");
+        upd();
+      };
+      const upd = () => { const n = eps.querySelectorAll("input:checked").length;
+        btn.disabled = !n; btn.textContent = n ? `Assign ${n} episode${n > 1 ? "s" : ""}` : "Pick episode(s)"; };
+      eps.addEventListener("change", upd);
+      sel.addEventListener("change", load);
+      btn.onclick = () => save({kind: "tv", ...base(x), season: +sel.value,
+        episodes: [...eps.querySelectorAll("input:checked")].map(i => +i.value)});
+      await load();
+      if (hint.episode != null && +sel.value === hint.season) {   // pre-check the episode the source reported
+        const cb = eps.querySelector(`input[value="${hint.episode}"]`);
+        if (cb) { cb.checked = true; upd(); }
+      }
+      focusPick();
+    } catch (err) { pick.innerHTML = `<div class="hint">${esc(err.message)}</div>`; }
+  }
+  $("form", container).addEventListener("submit", e => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    save({kind: f.kind, title: f.title.trim(), year: +f.year || null, imdb: f.imdb.trim() || null,
+      tvdb: +f.tvdb || null, tmdb: +f.tmdb || null, season: +f.season || null,
+      episodes: (f.episodes || "").split(/[ ,]+/).filter(Boolean).map(Number)});
+  });
+}
+
+// -------------------------------------------------------------------- modal
+const modal = $("#modal");
+const modalOpen = () => modal.classList.contains("on");
+function openModal(s) {
+  $("#mTitle").textContent = `${s.app_name} · ${dayLabel(s.started_at)} ${hhmm(s.started_at)} · ${mins(s.played_seconds)}`;
+  modal.classList.add("on");
+  searchBox($("#mBody"), s.id, s.items[0]?.title || s.hint_title || "",
+            {season: s.hint_season, episode: s.hint_episode});
+}
+function closeModal() { modal.classList.remove("on"); $("#mBody").innerHTML = ""; }
+$("#mClose").onclick = closeModal;
+modal.addEventListener("click", e => { if (e.target === modal) closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && modalOpen()) closeModal(); });
+
+refresh().catch(err => toast(err.message));
+setInterval(() => { if (!document.hidden && !modalOpen()) refresh().catch(() => {}); }, 5000);
+</script>
+</body>
+</html>

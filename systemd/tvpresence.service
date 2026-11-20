@@ -1,0 +1,12 @@
+[Unit]
+Description=TV Discord Presence (LG webOS -> Discord Rich Presence)
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/share/tvpresence/venv/bin/python %h/tv-discord-presence/tvpresence.py
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=graphical-session.target

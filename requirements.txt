@@ -1,0 +1,2 @@
+aiowebostv>=0.7
+pypresence>=4.6
