@@ -21,7 +21,7 @@ Playing on TV · 00:12:34    →     The Hotline
 ## Requirements
 
 - Python ≥ 3.11 on Linux, macOS or Windows (see [Platforms](#platforms)). The dashboard is stdlib only; the presence daemon uses a venv.
-- LG webOS TV on the same network with *LG Connect Apps* enabled (see [TV connection](#tv-connection)).
+- LG webOS TV on the same network (see [TV connection](#tv-connection)).
 - Discord desktop running on the same machine, with Settings → Activity Privacy → *Share your detected activities with others* turned on. You also need a Discord **Application ID** (`client_id`); see [Discord application](#discord-application).
 - A TMDB API key.
 - For pushing: [trakt-scrobbler](https://github.com/iamkroot/trakt-scrobbler) installed with pipx and authenticated (the dashboard reuses its client id and token), and a Simkl app + token.
@@ -75,10 +75,9 @@ tailscale serve --https=8444 off               # to remove it
 
 There is no hack involved: `tvpresence` uses webOS's local control API (SSAP), the same one LG's remote apps and Home Assistant talk to, through the [aiowebostv](https://github.com/home-assistant-libs/aiowebostv) library.
 
-**On the TV, once:**
+**On the TV:** nothing to configure on recent models; the control API is on by default. Just give the TV a fixed IP (a DHCP reservation in your router) and put it in `tv_host`.
 
-1. Enable **LG Connect Apps**. Its location depends on the webOS version: older models have it under *Network*; newer ones under *General → Devices / External Devices* (sometimes paired with *Mobile TV On*).
-2. Give the TV a fixed IP (a DHCP reservation in your router) and put it in `tv_host`.
+Only if the connection is refused: look for **LG Connect Apps** (older webOS, under *Network*) or *Mobile TV On* / *External Devices* (newer webOS) and make sure it is on.
 
 **Pairing (first run):**
 
