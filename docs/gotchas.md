@@ -41,7 +41,7 @@ Things that cost real debugging time. Check here first.
 
 ## Android TV (Mi Box)
 
-- Turning on HDMI-CEC on the box (`settings put global hdmi_control_enabled 1`) while the TV's CEC (LG: SIMPLINK) is **off** left Netflix with **no sound**: the box kept negotiating audio over CEC with a TV that never answered. Turn SIMPLINK on in the TV first, then CEC on the box. A box with no CEC physical address (`0xFFFFFFFF` in `dumpsys hdmi_control`) means the TV is not talking CEC.
+- **HDMI-CEC (LG remote controlling the box):** the box reads its CEC *physical address* from the TV only at boot or HDMI hotplug. Turning `hdmi_control_enabled` on at runtime leaves it at `0xFFFFFFFF` (no address), and in that half state Netflix lost its sound. Fix: `settings put global hdmi_control_enabled 1`, then **reboot the box**; it comes back with `physical_address: 0x1000` and the TV's key presses show up as `<User Control Pressed>` in `dumpsys hdmi_control`. SIMPLINK must be on in the LG (it was, the whole time).
 - Netflix registers a media session but with `metadata: null`: state and position only, no title.
 
 ## HBO Max
