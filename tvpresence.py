@@ -369,7 +369,7 @@ class TvPresence:
         log.info("Connected to Discord")
         return True
 
-    async def push(self, info, ident=None) -> None:
+    async def push(self, info, ident=None, hint=None) -> None:
         if info is None:
             if self.current_key is not None:
                 await self.rpc.clear()
@@ -388,12 +388,28 @@ class TvPresence:
             (ident["id"], ident["title"], ident["season"], ident["episode"], ident["poster"])
             if ident else None
         )
-        key = (app_id, state, ident_key)
+        hint = hint if hint and hint[0] else None
+        key = (app_id, state, ident_key, hint)
         if key == self.current_key:
             return
         if ident:
             await self.push_identified(info, ident, paused, start)
             self.current_key = key
+            return
+        if hint:  # the app itself publishes what is playing (Android TV media session, e.g. YouTube)
+            title, sub = hint
+            await self.rpc.update(
+                activity_type=ActivityType.WATCHING,
+                status_display_type=StatusDisplayType.DETAILS,
+                name=name,
+                details=title[:128],
+                state=(f"Paused · {sub}" if paused else sub)[:128] if sub else ("Paused" if paused else f"{name} on TV"),
+                large_image=logo,
+                large_text=name,
+                start=None if paused else start,
+            )
+            self.current_key = key
+            log.info("Presence: %s — %s — %s", name, title, sub or "")
             return
         await self.rpc.update(
             activity_type=ActivityType.WATCHING,
@@ -446,7 +462,7 @@ class TvPresence:
                 if not info:
                     info = None
                 # History is recorded even when Discord is not running
-                ident = None
+                ident = hint = None
                 if self.history:
                     try:
                         media = getattr(self, "media_id", None) if info else None
@@ -467,14 +483,14 @@ class TvPresence:
                         except Exception as e:
                             log.warning("History[androidtv]: %s", e)
                     if info is None and atv_info and atv_info[0] not in self.atv_ignore:
-                        info, ident = atv_info, atv_ident
+                        info, ident, hint = atv_info, atv_ident, atv_hint
                 # reset the timer when the app leaves the foreground
                 active = info[0] if info else None
                 for a in list(self.app_since):
                     if a != active:
                         del self.app_since[a]
                 if await self.ensure_rpc():
-                    await self.push(info, ident)
+                    await self.push(info, ident, hint)
             except Exception as e:
                 log.warning("Error: %s — reconnecting", e)
                 self.current_key = None
