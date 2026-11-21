@@ -63,6 +63,9 @@ button:disabled{opacity:.5;cursor:default}
 .eps label{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;background:#12151b;font-size:14px;cursor:pointer}
 .eps input[type=checkbox]{width:16px;height:16px;margin:0;flex:none;accent-color:var(--acc)}
 .eps label span{color:var(--mut);font-size:12px;margin-left:auto}
+.eps .manual-ep{border:1px dashed var(--line)}
+.eps .manual-ep input.mnum{width:56px;padding:4px 6px}
+.eps .manual-ep input.mtitle{flex:1;padding:4px 8px}
 .manual{margin-top:12px}
 .manual summary{color:var(--mut);font-size:13px;cursor:pointer}
 .manual form{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
@@ -491,19 +494,32 @@ function searchBox(container, sid, initial, hint = {}) {
         eps.innerHTML = `<div class="hint"><span class="spin"></span></div>`;
         const {episodes} = await api(`/api/tmdb/tv/${x.ids.tmdb}/season/${sel.value}`);
         eps.innerHTML = episodes.map(e => `<label><input type="checkbox" value="${e.number}">
-          E${e.number} · ${esc(e.name || "")}<span>${e.runtime ? e.runtime + " min" : ""}</span></label>`).join("");
+          E${e.number} · ${esc(e.name || "")}<span>${e.runtime ? e.runtime + " min" : ""}</span></label>`).join("") +
+          // TMDB lags behind new releases: let an episode it does not list yet be added by hand
+          `<label class="manual-ep"><input type="checkbox" class="mchk"> E<input type="number" class="mnum" min="1"
+            value="${(episodes.at(-1)?.number || 0) + 1}"> <input class="mtitle" placeholder="Episode not on TMDB yet: title (optional)"></label>`;
+        const mt = $(".mtitle", eps), mc = $(".mchk", eps);
+        [mt, $(".mnum", eps)].forEach(el => el.addEventListener("input", () => { mc.checked = true; upd(); }));
         upd();
       };
       const upd = () => { const n = eps.querySelectorAll("input:checked").length;
         btn.disabled = !n; btn.textContent = n ? `Assign ${n} episode${n > 1 ? "s" : ""}` : "Pick episode(s)"; };
       eps.addEventListener("change", upd);
       sel.addEventListener("change", load);
-      btn.onclick = () => save({kind: "tv", ...base(x), season: +sel.value,
-        episodes: [...eps.querySelectorAll("input:checked")].map(i => +i.value)});
+      btn.onclick = () => {
+        const picked = [...eps.querySelectorAll("input[type=checkbox]:checked:not(.mchk)")].map(i => +i.value);
+        const manual = $(".mchk", eps)?.checked ? +$(".mnum", eps).value : null;
+        if (manual && !picked.includes(manual)) picked.push(manual);
+        save({kind: "tv", ...base(x), season: +sel.value, episodes: picked,
+              episode_title: manual ? ($(".mtitle", eps).value.trim() || null) : null});
+      };
       await load();
       if (hint.episode != null && +sel.value === hint.season) {   // pre-check the episode the source reported
         const cb = eps.querySelector(`input[value="${hint.episode}"]`);
         if (cb) { cb.checked = true; upd(); }
+      } else if (hint.episodeTitle && hint.season == null) {
+        // the device named an episode TMDB does not list yet (HBO "Public Enemy Number Two"): pre-fill it by hand
+        $(".mtitle", eps).value = hint.episodeTitle; $(".mchk", eps).checked = true; upd();
       }
       focusPick();
     } catch (err) { pick.innerHTML = `<div class="hint">${esc(err.message)}</div>`; }
