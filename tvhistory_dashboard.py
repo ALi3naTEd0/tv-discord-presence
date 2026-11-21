@@ -391,7 +391,28 @@ def search_all(q: str) -> dict:
     for rec, ex in zip(merged, POOL.map(check, merged)):
         rec["exists"] = ex
         rec["src"] = sorted(rec["src"])
-    return {"results": merged, "errors": errors}
+    return {"results": collapse_listings(merged), "errors": errors}
+
+
+def collapse_listings(recs: list) -> list:
+    """The same work listed twice (TMDB has it as a movie AND a one-episode series, same IMDb id):
+    keep one card, the listing that exists on most services (that is where it will be sent),
+    then the one with a TVDB id; the other stays reachable as an alternative."""
+    def score(r):
+        ex = r.get("exists") or {}
+        return (bool(ex.get("trakt")) + bool(ex.get("simkl")), bool(r["ids"].get("tvdb")), "imdb" in r["src"])
+    out: list[dict] = []
+    for r in recs:
+        imdb = r["ids"].get("imdb")
+        twin = next((o for o in out if imdb and o["ids"].get("imdb") == imdb and o["kind"] != r["kind"]), None)
+        if not twin:
+            out.append(r)
+            continue
+        best, other = (r, twin) if score(r) > score(twin) else (twin, r)
+        best.setdefault("alts", []).append({k: other[k] for k in ("kind", "title", "year", "label", "ids", "exists", "poster")})
+        if best is r:
+            out[out.index(twin)] = r
+    return out
 
 
 # ----------------------------------------------------------------------- push

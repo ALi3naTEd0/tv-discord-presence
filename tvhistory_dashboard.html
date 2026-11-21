@@ -43,6 +43,7 @@ button:disabled{opacity:.5;cursor:default}
 .bar{height:6px;background:#0c0e12;border-radius:99px;overflow:hidden;margin-top:12px}
 .bar span{display:block;height:100%;background:var(--acc);border-radius:99px}
 .chip.src{color:var(--tx)}
+.chip.alt{cursor:pointer;color:var(--acc);border-style:dashed}
 .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 .actions button{font-size:13px;padding:5px 10px}
 .day{color:var(--mut);font-size:13px;margin:18px 2px 8px;text-transform:capitalize}
@@ -397,13 +398,15 @@ function searchBox(container, sid, initial, hint = {}) {
         <div style="min-width:0"><div class="title">${esc(x.title)} ${x.year ? `<span class="meta">(${x.year})</span>` : ""}</div>
         <div class="chips"><span class="chip src">${esc(x.label)}</span>
           ${x.src.includes("tmdb") ? `<span class="chip src">TMDB</span>` : ""}${x.src.includes("imdb") ? `<span class="chip src">IMDb</span>` : ""}
-          ${existsChip("Trakt", x.exists.trakt)}${existsChip("Simkl", x.exists.simkl)}</div>
+          ${existsChip("Trakt", x.exists.trakt)}${existsChip("Simkl", x.exists.simkl)}
+          ${(x.alts || []).map((a, j) => `<span class="chip alt" data-alt="${j}" title="Same work, listed separately on TMDB. Use this listing instead">also as ${esc(a.label)} ↗</span>`).join("")}</div>
         ${x.overview ? `<p>${esc(x.overview)}</p>` : ""}</div></button>`).join("") +
         (r.errors.length ? `<div class="hint">Warnings: ${esc(r.errors.join("; "))}</div>` : "");
       out.onclick = e => {
         const b = e.target.closest(".res"); if (!b) return;
         if (b.style.display === "none") return;
-        choose(r.results[+b.dataset.i], +b.dataset.i);
+        const alt = e.target.closest(".alt"), x = r.results[+b.dataset.i];
+        choose(alt ? {...x.alts[+alt.dataset.alt], src: x.src} : x, +b.dataset.i);
       };
     } catch (err) { if (my === seq) out.innerHTML = `<div class="hint">${esc(err.message)}</div>`; }
   };
