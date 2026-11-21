@@ -139,17 +139,18 @@ class AndroidTv:
         return True
 
     def read(self):
-        """-> (info, media_id, hint) like the LG reader, or (None, None, None)."""
+        """-> (info, media_id, hint, position_seconds) like the LG reader, or all None."""
         if not self._connect():
-            return None, None, None
+            return None, None, None, None
         try:
             power = self.dev.shell("dumpsys power | grep -m1 mWakefulness=")
             if "Awake" not in power:
-                return None, None, None
+                return None, None, None, None
             top = self.dev.shell("dumpsys activity activities | grep -m1 mResumedActivity")
             m = re.search(r" ([\w.]+)/", top)
             pkg = m.group(1) if m else ""
             sessions = self.dev.shell("dumpsys media_session")
+            uptime_ms = float(self.dev.shell("cat /proc/uptime").split()[0]) * 1000  # = elapsedRealtime
         except Exception as e:
             log.debug("Android TV read failed: %s", e)
             try:
@@ -157,10 +158,10 @@ class AndroidTv:
             except Exception:
                 pass
             self.dev = None
-            return None, None, None
+            return None, None, None, None
         if not pkg or pkg.startswith(ANDROID_SYSTEM):
-            return None, None, None
-        play, title, subtitle = None, None, None
+            return None, None, None, None
+        play, title, subtitle, pos = None, None, None, None
         for block in re.split(r"\n    (?=\S)", sessions):
             if f"package={pkg}" not in block:
                 continue
@@ -168,6 +169,11 @@ class AndroidTv:
             code = int(st.group(1)) if st else 0
             if code == 3 or (play is None and code in (2, 6)):  # 3 playing, 2 paused, 6 buffering
                 play = "playing" if code in (3, 6) else "paused"
+                pm = re.search(r"position=(-?\d+).*?speed=([\d.]+), updated=(\d+)", block)
+                if pm and int(pm.group(1)) >= 0:
+                    # position was sampled at `updated` (elapsedRealtime): advance it to now
+                    p_ms, speed, upd = int(pm.group(1)), float(pm.group(2)), int(pm.group(3))
+                    pos = (p_ms + (max(0.0, uptime_ms - upd) * speed if code == 3 else 0)) / 1000
                 d = re.search(r"description=([^\n]*)", block)
                 if d:
                     parts = [p.strip() for p in d.group(1).split(",")]
@@ -179,8 +185,8 @@ class AndroidTv:
         elif play:
             name, logo = pkg.rsplit(".", 1)[-1].capitalize(), None
         else:
-            return None, None, None  # unknown app with no media session: not a player
-        return (pkg, name, logo, play), title, (title, subtitle)
+            return None, None, None, None  # unknown app with no media session: not a player
+        return (pkg, name, logo, play), title, (title, subtitle), pos
 
 log = logging.getLogger("tvpresence")
 
@@ -225,7 +231,7 @@ class HistoryRecorder:
         self._prev_playing = False
         self._left_player = False
 
-    def tick(self, info, media_id: str | None = None, hint: tuple | None = None):
+    def tick(self, info, media_id: str | None = None, hint: tuple | None = None, pos: float | None = None):
         now, mono = time.time(), time.monotonic()
         gap = 0.0 if self._last_mono is None else mono - self._last_mono
         self._last_mono = mono
@@ -270,6 +276,8 @@ class HistoryRecorder:
             self._prev_playing = False  # the previous interval was not playback
         if hint and hint[0] and not sess["hint_title"]:
             db.set_hint(self.conn, sess["id"], *hint)
+        if pos is not None:
+            db.set_position(self.conn, sess["id"], pos)
 
         if playing:
             add = gap if self._prev_playing and gap <= MAX_TICK_GAP else 0.0
@@ -377,7 +385,7 @@ class TvPresence:
         log.info("Connected to Discord")
         return True
 
-    async def push(self, info, ident=None, hint=None) -> None:
+    async def push(self, info, ident=None, hint=None, pos=None, played=None) -> None:
         if info is None:
             if self.current_key is not None:
                 await self.rpc.clear()
@@ -390,14 +398,25 @@ class TvPresence:
         if not playing and not paused and not self.cfg["show_when_browsing"]:
             await self.push(None)
             return
-        start = self.app_since.setdefault(app_id, int(time.time()))
+        now = time.time()
+        # Elapsed time: the real playback position when the device reports it (Android TV),
+        # else the session's accumulated play time (survives restarts), else time in the app.
+        if pos is not None:
+            start = int(now - pos)
+        elif played:
+            start = int(now - played)
+        else:
+            start = self.app_since.setdefault(app_id, int(now))
+        runtime = (ident["runtime"] if ident is not None and "runtime" in ident.keys() else None)
+        # A progress bar only with a real position (Android TV) and a known runtime
+        self._end = int(start + runtime * 60) if pos is not None and runtime else None
         state = "Paused" if paused else ("Playing" if playing else "Browsing")
         ident_key = (
             (ident["id"], ident["title"], ident["season"], ident["episode"], ident["poster"])
             if ident else None
         )
         hint = hint if hint and hint[0] else None
-        key = (app_id, state, ident_key, hint)
+        key = (app_id, state, ident_key, hint, None if paused else start // 20)  # re-send after a seek
         if key == self.current_key:
             return
         if ident:
@@ -458,6 +477,7 @@ class TvPresence:
             small_image=logo if poster else None,
             small_text=f"{name} on TV" if poster else None,
             start=None if paused else start,
+            end=None if paused else getattr(self, "_end", None),
         )
         log.info("Presence: %s — %s — %s", name, title, line)
 
@@ -470,35 +490,38 @@ class TvPresence:
                 if not info:
                     info = None
                 # History is recorded even when Discord is not running
-                ident = hint = None
+                ident = hint = pos = played = None
                 if self.history:
                     try:
                         media = getattr(self, "media_id", None) if info else None
-                        ident = self.history.identification(self.history.tick(info, media))
+                        sess = self.history.tick(info, media)
+                        ident = self.history.identification(sess)
+                        played = sess["played_seconds"] if sess else None
                     except Exception as e:
                         log.warning("History: %s", e)
                 # Android TV box: its own session; shown in Discord when the LG shows nothing
                 if self.atv:
-                    atv_info = atv_media = atv_hint = atv_ident = None
+                    atv_info = atv_media = atv_hint = atv_ident = atv_pos = atv_played = None
                     try:
-                        atv_info, atv_media, atv_hint = await asyncio.wait_for(asyncio.to_thread(self.atv.read), 25)
+                        atv_info, atv_media, atv_hint, atv_pos = await asyncio.wait_for(asyncio.to_thread(self.atv.read), 25)
                     except Exception as e:
                         log.debug("Android TV: %s", e)
                     if self.atv_history:
                         try:
-                            atv_ident = self.atv_history.identification(
-                                self.atv_history.tick(atv_info, atv_media, atv_hint))
+                            s2 = self.atv_history.tick(atv_info, atv_media, atv_hint, atv_pos)
+                            atv_ident = self.atv_history.identification(s2)
+                            atv_played = s2["played_seconds"] if s2 else None
                         except Exception as e:
                             log.warning("History[androidtv]: %s", e)
                     if info is None and atv_info and atv_info[0] not in self.atv_ignore:
-                        info, ident, hint = atv_info, atv_ident, atv_hint
+                        info, ident, hint, pos, played = atv_info, atv_ident, atv_hint, atv_pos, atv_played
                 # reset the timer when the app leaves the foreground
                 active = info[0] if info else None
                 for a in list(self.app_since):
                     if a != active:
                         del self.app_since[a]
                 if await self.ensure_rpc():
-                    await self.push(info, ident, hint)
+                    await self.push(info, ident, hint, pos, played)
             except Exception as e:
                 log.warning("Error: %s — reconnecting", e)
                 self.current_key = None

@@ -28,6 +28,12 @@ webOS only reports `appId` and `playState` (plus an opaque `mediaId`). No title,
 - **Hides** unidentified sessions under an app's own minimum (`min_seconds_by_app`, YouTube = 20 min) instead of dropping them (`auto_hidden = 1`, dashboard filter *Short*). The dashboard purges them after 7 days. There is no automatic matching.
 - **Resumes** the open session after a service restart if it was seen less than `resume_window` (10 min) ago, so restarts do not split a viewing.
 
+## Discord timeline
+
+- **Android TV:** the media session's real position (sampled at `updated`, advanced to now with `/proc/uptime` × speed) sets the elapsed time; with an identified item and its TMDB runtime, Discord also gets an end timestamp, i.e. a progress bar.
+- **LG:** no position exists, so the elapsed time is the session's accumulated play time (it survives service restarts); no progress bar.
+- Paused: no timestamps. A seek of 20+ s re-sends the activity.
+
 ## Database (`tvhistory_db.py`)
 
 - `sessions`: one row per viewing: `app_id`, `app_name`, `started_at`, `last_play_at`, `ended_at`, `played_seconds`, `state` (`open|closed`), `ignored`, `media_id`, `source` (`tv|plex`), `source_key` (unique, dedupes Plex imports), and `hint_title/season/episode` (what Plex said, used to pre-fill the picker).
@@ -55,7 +61,7 @@ Stdlib HTTP server bound to `127.0.0.1:7790`. POST endpoints require `Content-Ty
 
 ### Auto-send
 
-Every 2 minutes (`auto_loop`), closed, identified, non-ignored sessions with something still pending are sent like a scrobble would: first `api_verify` marks plays already in your history as added (no duplicates), then `api_push`. LG and Android TV sessions qualify only if `played_seconds` ≥ `auto_push_min_ratio` (0.8) × the TMDB runtime of their items; below that, or with an unknown runtime, they stay pending with the reason in the chip tooltip. Plex views always qualify (Plex marks them watched at ~90 %). `not_found` items are retried at most once a day. Disable with `[history] auto_push = false`.
+Every 2 minutes (`auto_loop`), closed, identified, non-ignored sessions with something still pending are sent like a scrobble would: first `api_verify` marks plays already in your history as added (no duplicates), then `api_push`. LG and Android TV sessions qualify only if the watched time — `played_seconds`, or on Android TV the larger of that and the last real playback `position` — is ≥ `auto_push_min_ratio` (0.8) × the TMDB runtime of their items (stored as `items.runtime`); below that, or with an unknown runtime, they stay pending with the reason in the chip tooltip. Plex views always qualify (Plex marks them watched at ~90 %). `not_found` items are retried at most once a day. Disable with `[history] auto_push = false`.
 
 ### Plex
 

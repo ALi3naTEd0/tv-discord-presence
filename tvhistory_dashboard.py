@@ -932,18 +932,32 @@ def tidy_short_sessions() -> None:
                  (time.time() - SHORT_KEEP_DAYS * 86400,))
 
 
+def item_runtime(it) -> int | None:
+    """Runtime in minutes of a movie or episode according to TMDB."""
+    if not it["tmdb"]:
+        return None
+    try:
+        if it["kind"] == "movie":
+            return tmdb(f"/movie/{it['tmdb']}").get("runtime") or None
+        eps = tmdb(f"/tv/{it['tmdb']}/season/{it['season']}").get("episodes", [])
+        return next((e.get("runtime") for e in eps if e.get("episode_number") == it["episode"]), None) or None
+    except Exception:
+        return None
+
+
+def fill_runtimes(sid: int) -> None:
+    conn = db.connect()
+    for it in conn.execute("SELECT * FROM items WHERE session_id=? AND runtime IS NULL", (sid,)).fetchall():
+        rt = item_runtime(it)
+        if rt:
+            conn.execute("UPDATE items SET runtime=? WHERE id=?", (rt, it["id"]))
+
+
 def expected_seconds(items) -> float | None:
     """Total runtime of a session's items according to TMDB (None if any is unknown)."""
     total = 0.0
     for it in items:
-        try:
-            if it["kind"] == "movie":
-                rt = tmdb(f"/movie/{it['tmdb']}").get("runtime") if it["tmdb"] else None
-            else:
-                eps = tmdb(f"/tv/{it['tmdb']}/season/{it['season']}").get("episodes", []) if it["tmdb"] else []
-                rt = next((e.get("runtime") for e in eps if e.get("episode_number") == it["episode"]), None)
-        except Exception:
-            rt = None
+        rt = (it["runtime"] if "runtime" in it.keys() else None) or item_runtime(it)
         if not rt:
             return None
         total += rt * 60
@@ -968,7 +982,9 @@ def auto_push() -> None:
         items = conn.execute("SELECT * FROM items WHERE session_id=?", (sess["id"],)).fetchall()
         if sess["source"] != "plex":
             exp = expected_seconds(items)
-            ratio = sess["played_seconds"] / exp if exp else None
+            # Android TV knows the real position: a session that started mid-way still counts what was watched
+            watched = max(sess["played_seconds"], sess["position"] or 0)
+            ratio = watched / exp if exp else None
             if ratio is None or ratio < CFG["auto_push_min_ratio"]:
                 note = (f"Watched {ratio:.0%} of the runtime (< {CFG['auto_push_min_ratio']:.0%}): not sent automatically"
                         if ratio is not None else "Runtime unknown: not sent automatically")
@@ -1214,6 +1230,7 @@ def api_identify(sid: int, b: dict) -> dict:
     except Exception:
         conn.execute("ROLLBACK")
         raise
+    fill_runtimes(sid)   # lets Discord show a progress bar and auto-send check the watched share
     return {"ok": True, "items": len(rows)}
 
 
@@ -1258,6 +1275,7 @@ def api_next(sid: int) -> dict:
     except Exception:
         conn.execute("ROLLBACK")
         raise
+    fill_runtimes(cur.lastrowid)
     return {"ok": True, "season": s, "episode": e, "session": cur.lastrowid}
 
 

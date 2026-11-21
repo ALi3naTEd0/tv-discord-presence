@@ -106,12 +106,18 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
                       ("hint_season", "INTEGER"),
                       ("hint_episode", "INTEGER"),
                       ("auto_hidden", "INTEGER NOT NULL DEFAULT 0"),
-                      ("hint_extra", "TEXT")):   # the device's second line (channel / tagline): YouTube hides real titles there  # short clip kept 7 days under "Short"
+                      ("hint_extra", "TEXT"),
+                      ("position", "REAL")):     # last real playback position in seconds (Android TV)   # the device's second line (channel / tagline): YouTube hides real titles there  # short clip kept 7 days under "Short"
         if col not in cols:
             try:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # the other process added it
+    if "runtime" not in {r[1] for r in conn.execute("PRAGMA table_info(items)")}:
+        try:
+            conn.execute("ALTER TABLE items ADD COLUMN runtime INTEGER")   # minutes, from TMDB
+        except sqlite3.OperationalError:
+            pass
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS sessions_source_key ON sessions(source_key)")
     return conn
 
@@ -144,6 +150,10 @@ def touch(conn, sid: int, now: float, played_add: float, playing: bool) -> None:
         conn.execute(
             "UPDATE sessions SET last_seen_at=? WHERE id=? AND state='open'", (now, sid)
         )
+
+
+def set_position(conn, sid: int, pos: float) -> None:
+    conn.execute("UPDATE sessions SET position=? WHERE id=? AND state='open'", (pos, sid))
 
 
 def set_media(conn, sid: int, media_id: str) -> None:
