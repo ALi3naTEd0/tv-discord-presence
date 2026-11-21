@@ -166,7 +166,8 @@ def reopen_recent(conn, source: str, app_id: str, media_id: str, within: float, 
 
 
 def set_position(conn, sid: int, pos: float) -> None:
-    conn.execute("UPDATE sessions SET position=? WHERE id=? AND state='open'", (pos, sid))
+    # Furthest point reached, not the last sample: players jump back to 0 when a video ends
+    conn.execute("UPDATE sessions SET position=MAX(COALESCE(position, 0), ?) WHERE id=? AND state='open'", (pos, sid))
 
 
 def set_media(conn, sid: int, media_id: str) -> None:
