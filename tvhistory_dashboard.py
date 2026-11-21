@@ -1382,7 +1382,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        if not getattr(self, "_head_only", False):
+            self.wfile.write(data)
+
+    def do_HEAD(self):   # browsers probe the service worker / icons with HEAD
+        self._head_only = True
+        try:
+            self.do_GET()
+        finally:
+            self._head_only = False
 
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
@@ -1390,6 +1398,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if u.path == "/":
                 return self.send(200, raw=PAGE.encode(), ctype="text/html; charset=utf-8")
+            if u.path in STATIC:
+                name, ctype = STATIC[u.path]
+                return self.send(200, raw=(STATIC_DIR / name).read_bytes(), ctype=ctype)
             if u.path == "/api/state":
                 return self.send(200, api_state(int(qs.get("days", ["60"])[0])))
             if u.path == "/api/search":
@@ -1465,6 +1476,18 @@ class Handler(BaseHTTPRequestHandler):
 
 
 PAGE = Path(__file__).with_name("tvhistory_dashboard.html").read_text(encoding="utf-8")
+STATIC_DIR = Path(__file__).with_name("static")
+# Branding + PWA (Couchlog): icons, manifest and a pass-through service worker.
+# The service worker is served from "/" so its scope covers the whole dashboard.
+STATIC = {
+    "/static/icon.svg": ("icon.svg", "image/svg+xml"),
+    "/static/icon-192.png": ("icon-192.png", "image/png"),
+    "/static/icon-512.png": ("icon-512.png", "image/png"),
+    "/static/apple-touch-icon.png": ("apple-touch-icon.png", "image/png"),
+    "/favicon.ico": ("favicon-32.png", "image/png"),
+    "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
+    "/sw.js": ("sw.js", "text/javascript; charset=utf-8"),
+}
 
 
 def main() -> None:

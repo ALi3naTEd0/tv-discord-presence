@@ -5,7 +5,7 @@ A small self-hosted stack for people who watch on an **LG webOS TV** and track w
 | Piece | What it does |
 |---|---|
 | `tvpresence.py` | Reads the foreground app and play/pause state from the TV, shows it as Discord Rich Presence (`Watching HBO Max`), and records every viewing session into a local SQLite history. |
-| `tvhistory_dashboard.py` + `.html` | Local web dashboard (port 7790) to identify those sessions (search TMDB + IMDb at once, or paste an ID/link), push them to Trakt and Simkl **by external ID** (automatically when an identified session ends and at least 80 % of its runtime was played), verify they landed, import Plex plays, and show a live *Now on Plex* card. Once a session is identified, the Discord presence shows the real title and poster. |
+| `tvhistory_dashboard.py` + `.html` | **Couchlog**, the local web dashboard (port 7790, installable as a PWA) to identify those sessions (search TMDB + IMDb at once, or paste an ID/link), push them to Trakt and Simkl **by external ID** (automatically when an identified session ends and at least 80 % of its runtime was played), verify they landed, import Plex plays, and show a live *Now on Plex* card. Once a session is identified, the Discord presence shows the real title and poster. |
 | `tvhistory_db.py` | Shared SQLite schema (`~/.local/share/tvpresence/history.db`). The database is the source of truth between the two processes. |
 | `tvsync_reconcile.py` | One-off CLI that reconciles the **full** Trakt ↔ Simkl history, with Plex as a witness. Dry-run by default. |
 
@@ -64,7 +64,7 @@ Then, in the config dir from the table above:
 
 The first connection shows a pairing prompt on the TV; accept it (details in [TV connection](#tv-connection)).
 
-Open <http://127.0.0.1:7790>. To reach it from your phone over Tailscale (tailnet only, **not** Funnel):
+Open <http://127.0.0.1:7790>. It is a PWA: in Chrome/Edge use *Install app* (address bar or menu); on iOS Safari, *Share → Add to Home Screen*. Installing needs HTTPS or localhost, so on other devices use the Tailscale URL. To reach it from your phone over Tailscale (tailnet only, **not** Funnel):
 
 ```bash
 tailscale serve --bg --https=8444 http://127.0.0.1:7790

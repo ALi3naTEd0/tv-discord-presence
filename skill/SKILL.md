@@ -31,7 +31,9 @@ Repo: `~/tv-discord-presence` (GitHub `ALi3naTEd0/tv-discord-presence`). Full do
 4. Keep the dashboard bound to `127.0.0.1`; expose only via `tailscale serve`.
 5. Do not commit or push unless asked.
 
-## Dashboard (UI)
+## Dashboard (UI) — "Couchlog"
+
+Branded **Couchlog** (logo `static/icon.svg`, favicon, `manifest.webmanifest`, pass-through `sw.js` served from `/`): installable as a PWA over HTTPS (Tailscale URL) or localhost.
 
 Local `http://127.0.0.1:7790`; from phone/other devices the tailnet URL on port 8444 (see `local.md`). UI is English, refreshes every 5 s.
 
