@@ -957,34 +957,43 @@ def tidy_short_sessions() -> None:
                  (time.time() - SHORT_KEEP_DAYS * 86400,))
 
 
-def item_runtime(it) -> int | None:
-    """Runtime in minutes of a movie or episode according to TMDB."""
+def item_runtime_info(it) -> tuple[int | None, bool]:
+    """(runtime in minutes according to TMDB, estimated?). Estimated = borrowed from the movie
+    listing of a one-episode series: often a placeholder (The Mad Pooper S1E1: a 120-min movie
+    listing for a docuseries episode), so it neither draws an end time nor gates auto-send."""
     if not it["tmdb"]:
-        return None
+        return None, False
     try:
         if it["kind"] == "movie":
-            return tmdb(f"/movie/{it['tmdb']}").get("runtime") or None
+            return tmdb(f"/movie/{it['tmdb']}").get("runtime") or None, False
         eps = tmdb(f"/tv/{it['tmdb']}/season/{it['season']}").get("episodes", [])
         rt = next((e.get("runtime") for e in eps if e.get("episode_number") == it["episode"]), None)
         if rt:
-            return rt
+            return rt, False
         show = tmdb(f"/tv/{it['tmdb']}")   # fall back to the show's typical episode length
         rt = (show.get("episode_run_time") or [None])[0] or (show.get("last_episode_to_air") or {}).get("runtime")
-        if not rt and show.get("number_of_episodes") == 1 and it["imdb"]:
-            # a one-episode "series" that TMDB also lists as a movie (same IMDb id): use the movie's runtime
+        if rt:
+            return rt, False
+        if show.get("number_of_episodes") == 1 and it["imdb"]:
+            # a one-episode "series" that TMDB also lists as a movie (same IMDb id): the movie's runtime
             mv = tmdb(f"/find/{it['imdb']}", external_source="imdb_id").get("movie_results") or []
             rt = tmdb(f"/movie/{mv[0]['id']}").get("runtime") if mv else None
-        return rt or None
+            return rt or None, bool(rt)
+        return None, False
     except Exception:
-        return None
+        return None, False
+
+
+def item_runtime(it) -> int | None:
+    return item_runtime_info(it)[0]
 
 
 def fill_runtimes(sid: int) -> None:
     conn = db.connect()
     for it in conn.execute("SELECT * FROM items WHERE session_id=? AND runtime IS NULL", (sid,)).fetchall():
-        rt = item_runtime(it)
+        rt, est = item_runtime_info(it)
         if rt:
-            conn.execute("UPDATE items SET runtime=? WHERE id=?", (rt, it["id"]))
+            conn.execute("UPDATE items SET runtime=?, runtime_est=? WHERE id=?", (rt, int(est), it["id"]))
 
 
 def expected_seconds(items) -> float | None:
@@ -1015,9 +1024,21 @@ def auto_push() -> None:
     for sess in rows:
         items = conn.execute("SELECT * FROM items WHERE session_id=?", (sess["id"],)).fetchall()
         if sess["source"] != "plex":
+            if any(it["runtime_est"] for it in items):
+                note = "Runtime is only an estimate from TMDB: not sent automatically. Send it if you finished it"
+                conn.execute("UPDATE items SET trakt_error=CASE WHEN trakt_status IN ('pending','ready') THEN ? ELSE trakt_error END,"
+                             " simkl_error=CASE WHEN simkl_status IN ('pending','ready') THEN ? ELSE simkl_error END"
+                             " WHERE session_id=?", (note, note, sess["id"]))
+                continue
             exp = expected_seconds(items)
-            # Android TV knows the real position: a session that started mid-way still counts what was watched
-            watched = max(sess["played_seconds"], sess["position"] or 0)
+            # Android TV knows the real position: a session that started mid-way still counts what was watched.
+            # With one title the furthest point is the measure: played_seconds adds up every attempt, so
+            # restarting the episode after coming back (same title within 6 h resumes the session) or
+            # rewinding counted the same minutes twice.
+            if sess["source"] == "androidtv" and sess["position"] and len(items) == 1:
+                watched = sess["position"]
+            else:
+                watched = max(sess["played_seconds"], sess["position"] or 0)
             ratio = watched / exp if exp else None
             if ratio is None or ratio < CFG["auto_push_min_ratio"]:
                 note = (f"Watched {ratio:.0%} of the runtime (< {CFG['auto_push_min_ratio']:.0%}): not sent automatically"

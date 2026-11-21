@@ -414,6 +414,8 @@ class TvPresence:
         else:
             start = self.app_since.setdefault(app_id, int(now))
         runtime = (ident["runtime"] if ident is not None and "runtime" in ident.keys() else None)
+        if ident is not None and "runtime_est" in ident.keys() and ident["runtime_est"]:
+            runtime = None   # borrowed placeholder (e.g. 120 min): elapsed only, no wrong end time
         # A progress bar only with a real position (Android TV) and a known runtime
         self._end = int(start + runtime * 60) if pos is not None and runtime else None
         state = "Paused" if paused else ("Playing" if playing else "Browsing")

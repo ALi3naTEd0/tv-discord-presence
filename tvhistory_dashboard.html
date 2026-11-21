@@ -135,6 +135,18 @@ const toast = (msg, ms = 4200) => { const t = $("#toast"); t.textContent = msg; 
   clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), ms); };
 const hhmm = ts => new Date(ts * 1000).toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"});
 const mins = s => `${Math.max(0, Math.round(s / 60))} min`;
+// Android TV reports the real position. played_seconds adds up every attempt (rewinds, restarting the
+// episode after coming back to it), so with one title the furthest point reached is what was watched.
+const watchedSecs = s => (s.source === "androidtv" && s.position && s.items.length <= 1) ? s.position : s.played_seconds;
+// Now card: where the episode is right now, and the furthest point if you went back.
+function nowTime(s) {
+  const live = s.live_position != null ? s.live_position : s.position;
+  if (live == null) return mins(s.played_seconds);
+  const it = s.items[s.items.length - 1];
+  const of = it && it.runtime ? ` of ${it.runtime_est ? "~" : ""}${it.runtime} min` : "";
+  const far = s.position && s.position - live > 60 ? ` · reached ${clock(s.position)}` : "";
+  return `at ${clock(live)}${of}${far}`;
+}
 const dayLabel = ts => {
   const d = new Date(ts * 1000), t = new Date(); t.setHours(0,0,0,0);
   const x = new Date(d); x.setHours(0,0,0,0);
@@ -229,7 +241,7 @@ function renderNowCard(box, s) {
   const paused = state.server_time - s.last_play_at > 12;
   let card = box.querySelector(`[data-now="${s.id}"]`);
   if (card && nowKeys[s.id] === key) {   // only refresh counter and state, keep what you are typing
-    $(".nowMins", card).textContent = mins(s.played_seconds);
+    $(".nowMins", card).textContent = nowTime(s);
     $(".nowDot", card).className = "dot nowDot" + (paused ? " pause" : "");
     $(".nowState", card).textContent = paused ? "paused" : "playing";
     return;
@@ -240,7 +252,7 @@ function renderNowCard(box, s) {
   card.innerHTML = `<div class="card now"><h2>Now on ${SRC[s.source] || "TV"}</h2>
     <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
       <span class="dot nowDot${paused ? " pause" : ""}"></span>
-      <span class="meta"><span class="nowState">${paused ? "paused" : "playing"}</span> · since ${hhmm(s.started_at)} · <span class="nowMins">${mins(s.played_seconds)}</span></span></div>
+      <span class="meta"><span class="nowState">${paused ? "paused" : "playing"}</span> · since ${hhmm(s.started_at)} · <span class="nowMins">${nowTime(s)}</span></span></div>
     <div class="nowBody" style="margin-top:12px"></div></div>`;
   const body = $(".nowBody", card);
   if (it) {
@@ -292,7 +304,7 @@ function renderList() {
       ${it0?.poster ? `<img class="poster" src="${esc(it0.poster)}" alt="">` : ""}
       <div style="flex:1;min-width:0">
         <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
-          <span class="meta">${hhmm(s.started_at)}–${hhmm(s.ended_at || s.last_seen_at)} · ${mins(s.played_seconds)}${src === "all" && s.source !== "plex" ? ` · ${SRC[s.source] || "LG TV"}` : ""}</span></div>
+          <span class="meta">${hhmm(s.started_at)}–${hhmm(s.ended_at || s.last_seen_at)} · ${mins(watchedSecs(s))}${src === "all" && s.source !== "plex" ? ` · ${SRC[s.source] || "LG TV"}` : ""}</span></div>
         ${s.items.length ? `<div class="title" style="margin-top:6px">${esc(it0.title)}</div>
           <ul class="items">${s.items.map(i => `<li><span class="meta">${epLine(i)}</span><div class="chips">${statusChip("trakt", i)}${statusChip("simkl", i)}</div></li>`).join("")}</ul>`
           : `${s.hint_title ? `<div class="title" style="margin-top:6px">${esc(s.hint_title)}</div>
@@ -509,7 +521,7 @@ function searchBox(container, sid, initial, hint = {}) {
 const modal = $("#modal");
 const modalOpen = () => modal.classList.contains("on");
 function openModal(s) {
-  $("#mTitle").textContent = `${s.app_name} · ${dayLabel(s.started_at)} ${hhmm(s.started_at)} · ${mins(s.played_seconds)}`;
+  $("#mTitle").textContent = `${s.app_name} · ${dayLabel(s.started_at)} ${hhmm(s.started_at)} · ${mins(watchedSecs(s))}`;
   modal.classList.add("on");
   const sh = searchHint(s);
   const cur = s.items[0];

@@ -49,3 +49,23 @@ Things that cost real debugging time. Check here first.
 ## HBO Max
 
 - There is no watch-history endpoint at all (only *Continue Watching*, ~90 days). The legacy `api.hbo.com` endpoints browser scrobblers used are dead. The TV recorder + dashboard is the workaround.
+
+## Borrowed runtimes are estimates (2026-11-20)
+
+When an episode has no runtime on TMDB, the show's typical length is used; failing that, for a
+one-episode series, the runtime of TMDB's *movie* listing with the same IMDb id. That last one is
+often a placeholder (The Mad Pooper S1E1: a 120-min movie listing for a docuseries episode, so
+Discord showed an end of 2:00:00 and auto-send saw 15 %). Such items get `items.runtime_est = 1`:
+Discord shows elapsed time only, the Now card says `of ~120 min`, and auto-send skips them with a
+note ("send it if you finished it"). The Mi Box media session does not expose the duration
+(`dumpsys media_session` prints position and title only), so there is no device-side fallback.
+
+## Played time vs. position on Android TV (2026-11-20)
+
+`played_seconds` adds up every playing interval of a session. Coming back to the same title within
+6 h resumes the session, so restarting the episode (or rewinding) counted the same minutes twice:
+18 min watched, back to YouTube, then the episode from 0 again showed "42 min played" at 23:00.
+`sessions.position` keeps the furthest point reached and `sessions.live_position` the last sample.
+For an Android TV session with one title the furthest point is the watched amount (list rows and
+auto-send); the Now card shows the live position (`at 24:10 of ~120 min`) plus `reached …` when you
+went back more than a minute.
