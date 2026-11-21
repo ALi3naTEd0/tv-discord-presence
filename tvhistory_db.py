@@ -104,7 +104,8 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
                       ("source_key", "TEXT"),                     # e.g. Plex historyKey
                       ("hint_title", "TEXT"),                     # what the source said, when it could not be identified
                       ("hint_season", "INTEGER"),
-                      ("hint_episode", "INTEGER")):
+                      ("hint_episode", "INTEGER"),
+                      ("auto_hidden", "INTEGER NOT NULL DEFAULT 0")):  # short clip kept 7 days under "Short"
         if col not in cols:
             try:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {decl}")
@@ -165,10 +166,17 @@ def close_session(conn, sid: int, min_seconds: float, ended_at: float | None = N
     row = conn.execute("SELECT * FROM sessions WHERE id=? AND state='open'", (sid,)).fetchone()
     if row is None:
         return
-    min_seconds = (min_by_app or {}).get(row["app_id"], min_seconds)
-    if row["played_seconds"] < min_seconds and not has_items(conn, sid):
-        conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
-        return
+    app_min = (min_by_app or {}).get(row["app_id"])
+    if not has_items(conn, sid):
+        if row["played_seconds"] < min_seconds:
+            conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
+            return
+        if app_min is not None and row["played_seconds"] < app_min:
+            # Under the app's own minimum (YouTube < 20 min): may still be a short film.
+            # Keep it hidden under "Short"; the dashboard purges it after 7 days if unidentified.
+            conn.execute("UPDATE sessions SET state='closed', ended_at=?, auto_hidden=1 WHERE id=? AND state='open'",
+                         (ended_at if ended_at is not None else row["last_seen_at"], sid))
+            return
     conn.execute(
         "UPDATE sessions SET state='closed', ended_at=? WHERE id=? AND state='open'",
         (ended_at if ended_at is not None else row["last_seen_at"], sid),

@@ -25,6 +25,7 @@ webOS only reports `appId` and `playState` (plus an opaque `mediaId`). No title,
 - **Closes** when the app leaves the foreground for more than `close_grace` (60 s), or stays paused / in menus for more than `pause_timeout` (30 min).
 - **Splits** when the `mediaId` changes *after* the player was left (back to the app's menu, then something else is played). Autoplay into the next episode without a menu gap keeps the same session — use **Next episode** in the dashboard for that.
 - **Drops** sessions shorter than `min_seconds` (120 s): trailers, menu autoplay.
+- **Hides** unidentified sessions under an app's own minimum (`min_seconds_by_app`, YouTube = 20 min) instead of dropping them (`auto_hidden = 1`, dashboard filter *Short*). The dashboard purges them after 7 days, and promotes the ones whose published title exactly matches a TMDB title.
 - **Resumes** the open session after a service restart if it was seen less than `resume_window` (10 min) ago, so restarts do not split a viewing.
 
 ## Database (`tvhistory_db.py`)

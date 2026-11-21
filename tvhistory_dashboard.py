@@ -919,9 +919,36 @@ def trakt_watching() -> dict | None:
         return None
 
 
+SHORT_KEEP_DAYS = 7
+
+
+def tidy_short_sessions() -> None:
+    """Short YouTube sessions (auto_hidden): promote the ones whose title matches a TMDB title
+    exactly (likely a short film or a full movie), purge the rest after SHORT_KEEP_DAYS."""
+    conn = db.connect()
+    conn.execute("DELETE FROM sessions WHERE auto_hidden=1 AND ended_at < ? AND id NOT IN (SELECT session_id FROM items)",
+                 (time.time() - SHORT_KEEP_DAYS * 86400,))
+    norm = lambda t: re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+    for s in conn.execute("SELECT id, hint_title FROM sessions WHERE auto_hidden=1 AND hint_title IS NOT NULL"
+                          " AND COALESCE(media_id,'') != 'checked'").fetchall():
+        try:
+            hits = tmdb("/search/multi", query=s["hint_title"]).get("results", [])
+        except Exception:
+            continue
+        if any(norm(h.get("title") or h.get("name")) == norm(s["hint_title"]) for h in hits[:5]
+               if h.get("media_type") in ("movie", "tv")):
+            conn.execute("UPDATE sessions SET auto_hidden=0 WHERE id=?", (s["id"],))
+        else:
+            conn.execute("UPDATE sessions SET media_id='checked' WHERE id=?", (s["id"],))  # don't ask TMDB again
+
+
 def plex_loop() -> None:
     first = True
     while True:
+        try:
+            tidy_short_sessions()
+        except Exception as e:
+            print(f"Short sessions: {e}", flush=True)
         try:
             n = plex_import()
             if n:
@@ -1103,6 +1130,7 @@ def api_identify(sid: int, b: dict) -> dict:
         poster = (IMG + det["poster_path"]) if det.get("poster_path") else poster
     if not title:
         raise ValueError("Title is required")
+    db.connect().execute("UPDATE sessions SET auto_hidden=0 WHERE id=?", (sid,))
     rows = []
     if kind == "movie":
         rows.append(("movie", title, year, None, None, None, ids["tmdb"], None, ids["imdb"], poster))

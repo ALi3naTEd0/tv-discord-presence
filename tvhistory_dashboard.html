@@ -97,6 +97,7 @@ button:disabled{opacity:.5;cursor:default}
     <button data-f="pending">Pending</button>
     <button data-f="sent">Sent</button>
     <button data-f="ignored">Ignored</button>
+    <button data-f="short" title="YouTube sessions under 20 min, kept 7 days in case one was a short film">Short</button>
   </nav>
   <section id="list"></section>
 </main>
@@ -147,6 +148,7 @@ const statusChip = (svc, it) => {
 };
 const sessKind = s => {
   if (s.ignored) return "ignored";
+  if (s.auto_hidden && !s.items.length) return "short";
   if (!s.items.length) return "unid";
   const done = s.items.every(i => ["added", "skipped"].includes(i.trakt_status) && ["added", "skipped"].includes(i.simkl_status));
   return done ? "sent" : "pending";
@@ -254,7 +256,7 @@ function renderNowCard(box, s) {
 
 function renderList() {
   const list = $("#list");
-  const ss = state.sessions.filter(s => s.state === "closed" && inSrc(s) && (filter === "all" ? sessKind(s) !== "ignored" : sessKind(s) === filter));
+  const ss = state.sessions.filter(s => s.state === "closed" && inSrc(s) && (filter === "all" ? !["ignored", "short"].includes(sessKind(s)) : sessKind(s) === filter));
   if (!ss.length) { list.innerHTML = `<div class="empty">Nothing here.</div>`; return; }
   let html = "", lastDay = null;
   for (const s of ss) {
