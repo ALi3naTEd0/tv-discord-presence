@@ -15,8 +15,9 @@ show_when_browsing = false
 [history]                          # every key is optional
 # --- capture (tvpresence.py) ---
 # enabled          = true
-# exclude_apps     = ["youtube.leanback.v4", "tv.twitch.tv.starshot.lg"]
+# exclude_apps     = ["tv.twitch.tv.starshot.lg"]
 # min_seconds      = 120           # shorter sessions are dropped (trailers, menu autoplay)
+# min_seconds_by_app = { "com.google.android.youtube.tv" = 1200, "youtube.leanback.v4" = 1200 }   # YouTube: keep 20+ min only
 # pause_timeout    = 1800          # paused/in menus longer than this closes the session
 # close_grace      = 60            # no streaming app in front (TV off, other input) closes it
 # resume_window    = 600           # after a restart, resume the open session if seen this recently

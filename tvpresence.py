@@ -60,9 +60,12 @@ DEFAULT_CONFIG = {
 DEFAULT_HISTORY = {
     "enabled": True,
     # Apps not recorded (not movies/shows)
-    "exclude_apps": ["youtube.leanback.v4", "tv.twitch.tv.starshot.lg"],
+    "exclude_apps": ["tv.twitch.tv.starshot.lg"],
     # Sessions shorter than this are dropped (trailers, menu autoplay)
     "min_seconds": 120,
+    # Per-app minimum: YouTube (LG and Android TV) is recorded, but only kept if it ran this long
+    # (documentaries, films) or you identified it; clips and music videos are dropped
+    "min_seconds_by_app": {"com.google.android.youtube.tv": 1200, "youtube.leanback.v4": 1200},
     # Paused / in menus longer than this ends the session
     "pause_timeout": 1800,
     # No streaming app in front (TV off, other input) longer than this closes it
@@ -92,8 +95,9 @@ ANDROID_APPS: dict[str, tuple[str, str]] = {
     "com.plexapp.android": ("Plex", "www.plex.tv"),
     "com.spotify.tv.android": ("Spotify", "www.spotify.com"),
 }
-# Never recorded (music, YouTube/Twitch, Plex: the Plex importer and DRPP cover it)
-ANDROID_EXCLUDE = ["com.spotify.tv.android", "com.google.android.youtube.tv", "tv.twitch.android.app",
+# Never recorded (music, Twitch, Plex: the Plex importer and DRPP cover it).
+# YouTube IS recorded on Android TV (it publishes titles); short sessions are dropped, see min_seconds_by_app
+ANDROID_EXCLUDE = ["com.spotify.tv.android", "tv.twitch.android.app",
                    "com.plexapp.android", "com.google.android.youtube.tvmusic"]
 ANDROID_SYSTEM = ("com.android.", "com.google.android.tvlauncher", "com.google.android.apps.tv.launcherx",
                   "com.google.android.katniss", "com.mitv.", "com.xiaomi.", "android")
@@ -202,8 +206,10 @@ class HistoryRecorder:
         self.min_seconds = float(h["min_seconds"])
         self.pause_timeout = float(h["pause_timeout"])
         self.close_grace = float(h["close_grace"])
+        self.min_by_app = {k: float(v) for k, v in (h.get("min_seconds_by_app") or {}).items()}
         self.conn = db.connect()
-        closed, resumed = db.recover(self.conn, self.min_seconds, float(h["resume_window"]), source=source)
+        closed, resumed = db.recover(self.conn, self.min_seconds, float(h["resume_window"]), source=source,
+                                     min_by_app=self.min_by_app)
         if closed:
             log.info("History[%s]: closed %d open session(s) on startup", source, closed)
         if resumed:
@@ -214,7 +220,7 @@ class HistoryRecorder:
         self._left_player = False  # the app is in front but has no media (in its menu)
 
     def _close(self, sess, why: str) -> None:
-        db.close_session(self.conn, sess["id"], self.min_seconds)
+        db.close_session(self.conn, sess["id"], self.min_seconds, min_by_app=self.min_by_app)
         log.info("History[%s]: session %d closed (%s)", self.source, sess["id"], why)
         self._prev_playing = False
         self._left_player = False
@@ -245,8 +251,10 @@ class HistoryRecorder:
         # If the media changes WITHOUT going through the menu (credits, ads, autoplay) it is not
         # split: for episode autoplay there is the dashboard's "Next episode" button.
         if sess and media_id:
-            if sess["media_id"] and media_id != sess["media_id"] and self._left_player:
-                self._close(sess, "contenido nuevo")
+            # Android TV media ids are the published titles: a new title is new content, no menu needed
+            reliable = self.source == "androidtv"
+            if sess["media_id"] and media_id != sess["media_id"] and (self._left_player or reliable):
+                self._close(sess, "new content")
                 sess = None
             elif media_id != sess["media_id"]:
                 db.set_media(self.conn, sess["id"], media_id)

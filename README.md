@@ -100,6 +100,8 @@ An Android TV / Google TV box (tested: Xiaomi Mi Box, Android 11) is read over *
 
 **What it reads:** the foreground app (`dumpsys activity`), the screen state (`dumpsys power`), and the app's **media session** (`dumpsys media_session`): playing/paused, position and, when the app publishes it, **title and subtitle**. That title is stored as a hint and pre-fills the picker. Netflix does not publish a title (only state and position); music apps like Spotify do.
 
+**YouTube** (on the box and on the LG) is recorded too, but a session is only kept if it ran **20+ minutes** or you identified it, so documentaries and films posted on YouTube can be matched and sent to Trakt/Simkl while clips and music videos are dropped. On the box the picker is pre-filled with the video title; the LG gives no title, so you type it.
+
 **Discord:** when an app publishes its title (YouTube: video + channel), Discord shows it directly, even for apps that are not recorded in the history. The box's activity is shown when the LG itself has nothing streaming in front (e.g. the LG is on the box's HDMI input). Plex and Spotify on the box are never shown or recorded (DRPP and the Plex importer cover Plex).
 
 ## Discord application

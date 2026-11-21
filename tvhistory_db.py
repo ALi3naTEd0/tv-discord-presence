@@ -150,21 +150,22 @@ def set_media(conn, sid: int, media_id: str) -> None:
 
 def set_hint(conn, sid: int, title: str | None, subtitle: str | None = None) -> None:
     """What the device itself reports as playing (Android media session); pre-fills the picker."""
-    if title:
-        conn.execute("UPDATE sessions SET hint_title=? WHERE id=? AND state='open'",
-                     (title if not subtitle else f"{title} — {subtitle}", sid))
+    if title:  # the subtitle is often a channel or a tagline: keep the search clean
+        conn.execute("UPDATE sessions SET hint_title=? WHERE id=? AND state='open'", (title, sid))
 
 
 def has_items(conn, sid: int) -> bool:
     return conn.execute("SELECT 1 FROM items WHERE session_id=? LIMIT 1", (sid,)).fetchone() is not None
 
 
-def close_session(conn, sid: int, min_seconds: float, ended_at: float | None = None) -> None:
-    """Close the session. If it lasted less than min_seconds and nobody
-    identified it, delete it (trailers, menu autoplay)."""
+def close_session(conn, sid: int, min_seconds: float, ended_at: float | None = None,
+                  min_by_app: dict | None = None) -> None:
+    """Close the session. If it lasted less than min_seconds (or the app's own minimum,
+    e.g. 20 min for YouTube) and nobody identified it, delete it (trailers, menu autoplay, clips)."""
     row = conn.execute("SELECT * FROM sessions WHERE id=? AND state='open'", (sid,)).fetchone()
     if row is None:
         return
+    min_seconds = (min_by_app or {}).get(row["app_id"], min_seconds)
     if row["played_seconds"] < min_seconds and not has_items(conn, sid):
         conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
         return
@@ -175,7 +176,7 @@ def close_session(conn, sid: int, min_seconds: float, ended_at: float | None = N
 
 
 def recover(conn, min_seconds: float, resume_window: float = 0, now: float | None = None,
-            source: str = "tv") -> tuple[int, int | None]:
+            source: str = "tv", min_by_app: dict | None = None) -> tuple[int, int | None]:
     """On startup after a restart: the most recent open session is resumed if it
     was seen less than resume_window ago (the first tick decides whether it is
     still the same app or closes it); the rest are closed. Returns (closed, resumed_id)."""
@@ -187,7 +188,7 @@ def recover(conn, min_seconds: float, resume_window: float = 0, now: float | Non
     closed = 0
     for r in rows:
         if r["id"] != keep:
-            close_session(conn, r["id"], min_seconds)
+            close_session(conn, r["id"], min_seconds, min_by_app=min_by_app)
             closed += 1
     return closed, keep
 

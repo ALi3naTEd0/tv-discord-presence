@@ -246,7 +246,8 @@ function renderNowCard(box, s) {
   } else {
     body.innerHTML = `<div class="meta" style="margin-bottom:8px">${s.hint_title
       ? `The device reports <b>${esc(s.hint_title)}</b>. Pick the right match below.`
-      : "What are you watching? Identify it and Discord will show it."}</div>`;
+      : "What are you watching? Identify it and Discord will show it."}${["com.google.android.youtube.tv", "youtube.leanback.v4"].includes(s.app_id)
+      ? `<br><span class="hint">YouTube is kept only if it runs 20+ min or you identify it; clips are dropped.</span>` : ""}</div>`;
     const wrap = document.createElement("div"); body.appendChild(wrap); searchBox(wrap, s.id, s.hint_title || "");
   }
 }
