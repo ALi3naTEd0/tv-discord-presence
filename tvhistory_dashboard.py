@@ -957,6 +957,74 @@ def tidy_short_sessions() -> None:
                  (time.time() - SHORT_KEEP_DAYS * 86400,))
 
 
+def tvmaze_show_id(imdb: str | None, tvdb: int | None) -> int | None:
+    """TVmaze (free, no key, very current for new releases) by TheTVDB or IMDb id."""
+    def fetch():
+        for key, val in (("thetvdb", tvdb), ("imdb", imdb)):
+            if not val:
+                continue
+            st, j = http_json("GET", f"https://api.tvmaze.com/lookup/shows?{key}={val}", timeout=10)
+            if st == 200 and isinstance(j, dict) and j.get("id"):
+                return j["id"]
+        return None
+    return cached(("tvmaze_id", imdb, tvdb), 6 * 3600, fetch)
+
+
+def tvmaze_episodes(show_id: int) -> list:
+    def fetch():
+        st, j = http_json("GET", f"https://api.tvmaze.com/shows/{show_id}/episodes", timeout=15)
+        return j if st == 200 and isinstance(j, list) else []
+    return cached(("tvmaze_eps", show_id), 3600, fetch)
+
+
+def show_episodes(tmdb_id: int, imdb: str | None = None, tvdb: int | None = None) -> dict:
+    """Every season and episode of a show, merged from TMDB and TVmaze (union by season+number),
+    so episodes TMDB has not added yet still show up. Specials last."""
+    show = tmdb(f"/tv/{tmdb_id}")
+    if not (imdb and tvdb):
+        try:
+            ext = tmdb(f"/tv/{tmdb_id}/external_ids")
+            imdb, tvdb = imdb or ext.get("imdb_id"), tvdb or ext.get("tvdb_id")
+        except Exception:
+            pass
+    seasons = {s["season_number"]: {"number": s["season_number"], "name": s.get("name"), "episodes": {}}
+               for s in show.get("seasons", [])}
+
+    def tmdb_season(n):
+        try:
+            return n, tmdb(f"/tv/{tmdb_id}/season/{n}").get("episodes", [])
+        except Exception:
+            return n, []
+    for n, eps in POOL.map(tmdb_season, list(seasons)[:40]):
+        for e in eps:
+            seasons[n]["episodes"][e["episode_number"]] = {
+                "number": e["episode_number"], "name": e.get("name"), "runtime": e.get("runtime"),
+                "air_date": e.get("air_date"), "src": ["tmdb"]}
+    tvm = None
+    try:
+        tvm = tvmaze_show_id(imdb, tvdb)
+        for e in tvmaze_episodes(tvm) if tvm else []:
+            if e.get("season") is None or e.get("number") is None:
+                continue
+            sz = seasons.setdefault(e["season"], {"number": e["season"], "name": f"Season {e['season']}", "episodes": {}})
+            cur = sz["episodes"].get(e["number"])
+            if cur:
+                cur["src"].append("tvmaze")
+                cur["runtime"] = cur["runtime"] or e.get("runtime")
+                cur["name"] = cur["name"] or e.get("name")
+            else:
+                sz["episodes"][e["number"]] = {"number": e["number"], "name": e.get("name"), "runtime": e.get("runtime"),
+                                               "air_date": e.get("airdate"), "src": ["tvmaze"]}
+    except Exception:
+        pass
+    out = []
+    for n in sorted(seasons, key=lambda k: (k == 0, k)):
+        eps = [seasons[n]["episodes"][k] for k in sorted(seasons[n]["episodes"])]
+        if eps:
+            out.append({"number": n, "name": seasons[n]["name"] or f"Season {n}", "episodes": eps})
+    return {"seasons": out, "tvmaze": tvm}
+
+
 def item_runtime_info(it) -> tuple[int | None, bool]:
     """(runtime in minutes according to TMDB, estimated?). Estimated = borrowed from the movie
     listing of a one-episode series: often a placeholder (The Mad Pooper S1E1: a 120-min movie
@@ -970,6 +1038,14 @@ def item_runtime_info(it) -> tuple[int | None, bool]:
         rt = next((e.get("runtime") for e in eps if e.get("episode_number") == it["episode"]), None)
         if rt:
             return rt, False
+        try:   # TVmaze often has new episodes (and their length) before TMDB
+            tvm = tvmaze_show_id(it["imdb"], it["tvdb"])
+            rt = next((e.get("runtime") for e in (tvmaze_episodes(tvm) if tvm else [])
+                       if e.get("season") == it["season"] and e.get("number") == it["episode"]), None)
+            if rt:
+                return rt, False
+        except Exception:
+            pass
         show = tmdb(f"/tv/{it['tmdb']}")   # fall back to the show's typical episode length
         rt = (show.get("episode_run_time") or [None])[0] or (show.get("last_episode_to_air") or {}).get("runtime")
         if rt:
@@ -1264,9 +1340,10 @@ def api_identify(sid: int, b: dict) -> dict:
         if not eps:
             raise ValueError("Pick at least one episode")
         if ids["tmdb"]:
-            try:
-                ep_titles = {e["episode_number"]: e.get("name") for e in
-                             tmdb(f"/tv/{int(ids['tmdb'])}/season/{season}").get("episodes", [])}
+            try:   # names from TMDB + TVmaze, so episodes TMDB lacks still get their title
+                sz = next((z for z in show_episodes(int(ids["tmdb"]), ids["imdb"], ids["tvdb"])["seasons"]
+                           if z["number"] == season), {"episodes": []})
+                ep_titles = {e["number"]: e.get("name") for e in sz["episodes"]}
             except Exception:
                 pass
         for e in eps:
@@ -1414,6 +1491,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, {"seasons": [
                     {"number": s["season_number"], "name": s.get("name"), "count": s.get("episode_count") or 0}
                     for s in d.get("seasons", []) if (s.get("episode_count") or 0) > 0]})
+            m = re.fullmatch(r"/api/show/(\d+)/episodes", u.path)
+            if m:
+                tv = (qs.get("tvdb") or [""])[0]
+                return self.send(200, show_episodes(int(m.group(1)), (qs.get("imdb") or [""])[0] or None,
+                                                    int(tv) if tv.isdigit() else None))
             m = re.fullmatch(r"/api/tmdb/tv/(\d+)/season/(\d+)", u.path)
             if m:
                 d = tmdb(f"/tv/{m.group(1)}/season/{m.group(2)}")

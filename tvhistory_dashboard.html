@@ -73,9 +73,13 @@ button:disabled{opacity:.5;cursor:default}
 .eps label{display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px;background:#12151b;font-size:14px;cursor:pointer}
 .eps input[type=checkbox]{width:16px;height:16px;margin:0;flex:none;accent-color:var(--acc)}
 .eps label span{color:var(--mut);font-size:12px;margin-left:auto}
-.eps .manual-ep{border:1px dashed var(--line)}
-.eps .manual-ep input.mnum{width:56px;padding:4px 6px}
-.eps .manual-ep input.mtitle{flex:1;padding:4px 8px}
+.seasons{display:flex;gap:6px;flex-wrap:wrap}
+.stab{font-size:13px;padding:5px 10px}.stab i{font-style:normal;color:var(--mut);margin-left:6px;font-size:12px}
+.stab.on{background:var(--acc);color:#0b1020;border-color:var(--acc)}.stab.on i{color:#0b1020}
+.eps label b{font-weight:600}
+.eps label.rep{border:1px dashed var(--acc)}
+.addman{color:var(--acc);font-size:13px;text-decoration:none}
+.manual-ep{display:flex;gap:6px;align-items:center}.manual-ep[hidden]{display:none}.manual-ep input.mnum{width:64px}.manual-ep input.mtitle{flex:1}
 .manual{margin-top:12px}
 .manual summary{color:var(--mut);font-size:13px;cursor:pointer}
 .manual form{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
@@ -291,7 +295,7 @@ function renderNowCard(box, s) {
       ? `<br><span class="hint">YouTube is kept only if it runs 20+ min or you identify it; clips are dropped.</span>` : ""}</div>`;
     const sh = searchHint(s);
     const wrap = document.createElement("div"); body.appendChild(wrap);
-    searchBox(wrap, s.id, sh.q, {season: s.hint_season, episode: s.hint_episode, episodeTitle: sh.episodeTitle});
+    searchBox(wrap, s.id, sh.q, {season: s.hint_season, episode: s.hint_episode, episodeTitle: sh.episodeTitle, reportedBy: s.app_name});
     if (sh.alt) {   // the other line: YouTube often hides the real title there
       const alt = document.createElement("div"); alt.className = "chips"; alt.style.marginTop = "8px";
       alt.innerHTML = `<span class="meta">Search instead:</span>` + [sh.alt, ...sh.alt.split(/\s(?:en|in|de|of)\s|[:|–—-]/)]
@@ -480,57 +484,78 @@ function searchBox(container, sid, initial, hint = {}) {
       focusPick();
       return;
     }
-    pick.innerHTML = `<div class="hint"><span class="spin"></span> Loading seasons…</div>`;
+    pick.innerHTML = `<div class="hint"><span class="spin"></span> Loading episodes…</div>`;
     focusPick();
     try {
-      const {seasons} = await api(`/api/tmdb/tv/${x.ids.tmdb}`);
-      const regular = seasons.filter(s => s.number > 0);
+      // Episodes merged from TMDB + TVmaze (TVmaze often lists new episodes first)
+      const qx = new URLSearchParams(Object.entries({imdb: x.ids.imdb, tvdb: x.ids.tvdb}).filter(([, v]) => v));
+      const {seasons, tvmaze} = await api(`/api/show/${x.ids.tmdb}/episodes?${qx}`);
       const norm = t => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-      if (hint.episodeTitle && hint.season == null) {   // e.g. HBO reports "Duty Calls": find its season
-        for (const z of regular.slice(0, 12)) {
-          try {
-            const {episodes} = await api(`/api/tmdb/tv/${x.ids.tmdb}/season/${z.number}`);
-            const hit = episodes.find(e => norm(e.name) === norm(hint.episodeTitle));
-            if (hit) { hint.season = z.number; hint.episode = hit.number; break; }
-          } catch {}
+      if (hint.episodeTitle && hint.season == null) {   // e.g. HBO reports "Duty Calls": find it in any season
+        for (const z of seasons) {
+          const hit = z.episodes.find(e => norm(e.name) === norm(hint.episodeTitle));
+          if (hit) { hint.season = z.number; hint.episode = hit.number; break; }
         }
       }
-      const first = seasons.find(z => z.number === hint.season) || regular[0] || seasons[0];
+      const regular = seasons.filter(z => z.number > 0);
+      let cur = seasons.find(z => z.number === hint.season) || regular[0] || seasons[0]
+        || {number: hint.season || 1, name: "Season 1", episodes: []};
+      // The app named an episode no catalog lists yet (HBO "Public Enemy Number Two"): show it as a row
+      const last = regular.at(-1) || cur;
+      const inList = (sn, en) => (seasons.find(z => z.number === sn)?.episodes || []).some(e => e.number === en);
+      let reported = null;
+      if (hint.episodeTitle && hint.season == null) {          // named by the app, found nowhere
+        reported = {season: last.number, number: (last.episodes.at(-1)?.number || 0) + 1, name: hint.episodeTitle};
+      } else if (hint.episodeTitle && hint.episode != null && !inList(hint.season, hint.episode)) {
+        reported = {season: hint.season, number: hint.episode, name: hint.episodeTitle};   // e.g. Change on an E2 TMDB lacks
+      }
+      if (reported) cur = seasons.find(z => z.number === reported.season) || cur;
       pick.innerHTML = `<div class="picker">${warn}<div class="title">${esc(x.title)}</div>
-        <select class="season">${seasons.map(s => `<option value="${s.number}" ${s.number === first.number ? "selected" : ""}>${esc(s.name || "Season " + s.number)} (${s.count})</option>`).join("")}</select>
-        <div class="eps"></div><button class="pri" disabled>Pick episode(s)</button></div>`;
-      const sel = $(".season", pick), eps = $(".eps", pick), btn = $("button", pick);
-      const load = async () => {
-        eps.innerHTML = `<div class="hint"><span class="spin"></span></div>`;
-        const {episodes} = await api(`/api/tmdb/tv/${x.ids.tmdb}/season/${sel.value}`);
-        eps.innerHTML = episodes.map(e => `<label><input type="checkbox" value="${e.number}">
-          E${e.number} · ${esc(e.name || "")}<span>${e.runtime ? e.runtime + " min" : ""}</span></label>`).join("") +
-          // TMDB lags behind new releases: let an episode it does not list yet be added by hand
-          `<label class="manual-ep"><input type="checkbox" class="mchk"> E<input type="number" class="mnum" min="1"
-            value="${(episodes.at(-1)?.number || 0) + 1}"> <input class="mtitle" placeholder="Episode not on TMDB yet: title (optional)"></label>`;
-        const mt = $(".mtitle", eps), mc = $(".mchk", eps);
-        [mt, $(".mnum", eps)].forEach(el => el.addEventListener("input", () => { mc.checked = true; upd(); }));
+        ${seasons.length > 1 ? `<div class="seasons">${seasons.map(z =>
+          `<button class="stab" data-n="${z.number}">${z.number === 0 ? "Specials" : "Season " + z.number}<i>${z.episodes.length}</i></button>`).join("")}</div>` : ""}
+        <div class="eps"></div>
+        <a href="#" class="addman">+ Episode not listed? Add it by hand</a>
+        <div class="manual-ep" hidden><b>E</b><input type="number" class="mnum" min="1"><input class="mtitle" placeholder="Episode title (optional)"></div>
+        <div class="hint">Episodes from TMDB${tvmaze ? " + TVmaze" : ""}.</div>
+        <button class="pri go" disabled>Pick episode(s)</button></div>`;
+      const eps = $(".eps", pick), btn = $(".go", pick), man = $(".manual-ep", pick);
+      const upd = () => {
+        const n = eps.querySelectorAll("input:checked").length + (!man.hidden && +$(".mnum", pick).value ? 1 : 0);
+        btn.disabled = !n; btn.textContent = n ? `Assign ${n} episode${n > 1 ? "s" : ""}` : "Pick episode(s)";
+      };
+      const render = () => {
+        const rows = cur.episodes.map(e => ({...e}));
+        if (reported && reported.season === cur.number && !rows.some(e => e.number === reported.number)) {
+          rows.push({number: reported.number, name: reported.name, reported: true});
+          rows.sort((a, b) => a.number - b.number);
+        }
+        eps.innerHTML = rows.length ? rows.map(e => `<label class="${e.reported ? "rep" : ""}">
+            <input type="checkbox" value="${e.number}"${e.reported ? " data-rep" : ""}>
+            <b>E${e.number}</b> ${esc(e.name || "")}
+            <span>${e.reported ? `${hint.reportedBy ? "reported by " + esc(hint.reportedBy) : "your earlier pick"} · not on TMDB/TVmaze yet`
+              : [e.runtime ? e.runtime + " min" : "", e.air_date || "", (e.src || []).includes("tmdb") ? "" : "TVmaze"].filter(Boolean).join(" · ")}</span>
+          </label>`).join("") : `<div class="hint">No episodes listed for this season yet: add it by hand below.</div>`;
+        pick.querySelectorAll(".stab").forEach(b => b.classList.toggle("on", +b.dataset.n === cur.number));
+        $(".mnum", pick).value = (rows.at(-1)?.number || 0) + 1;
         upd();
       };
-      const upd = () => { const n = eps.querySelectorAll("input:checked").length;
-        btn.disabled = !n; btn.textContent = n ? `Assign ${n} episode${n > 1 ? "s" : ""}` : "Pick episode(s)"; };
       eps.addEventListener("change", upd);
-      sel.addEventListener("change", load);
+      man.addEventListener("input", upd);
+      pick.querySelectorAll(".stab").forEach(b => b.addEventListener("click", () => {
+        cur = seasons.find(z => z.number === +b.dataset.n); render();
+      }));
+      $(".addman", pick).addEventListener("click", e => { e.preventDefault(); man.hidden = false; $(".mtitle", pick).focus(); upd(); });
       btn.onclick = () => {
-        const picked = [...eps.querySelectorAll("input[type=checkbox]:checked:not(.mchk)")].map(i => +i.value);
-        const manual = $(".mchk", eps)?.checked ? +$(".mnum", eps).value : null;
-        if (manual && !picked.includes(manual)) picked.push(manual);
-        save({kind: "tv", ...base(x), season: +sel.value, episodes: picked,
-              episode_title: manual ? ($(".mtitle", eps).value.trim() || null) : null});
+        const picked = [...eps.querySelectorAll("input:checked")].map(i => +i.value);
+        let title = eps.querySelector("input[data-rep]:checked") ? reported.name : null;
+        const mn = +$(".mnum", pick).value;
+        if (!man.hidden && mn) { if (!picked.includes(mn)) picked.push(mn); title = $(".mtitle", pick).value.trim() || title; }
+        save({kind: "tv", ...base(x), season: cur.number, episodes: picked, episode_title: title});
       };
-      await load();
-      if (hint.episode != null && +sel.value === hint.season) {   // pre-check the episode the source reported
-        const cb = eps.querySelector(`input[value="${hint.episode}"]`);
-        if (cb) { cb.checked = true; upd(); }
-      } else if (hint.episodeTitle && hint.season == null) {
-        // the device named an episode TMDB does not list yet (HBO "Public Enemy Number Two"): pre-fill it by hand
-        $(".mtitle", eps).value = hint.episodeTitle; $(".mchk", eps).checked = true; upd();
-      }
+      render();
+      const target = reported ? reported.number : (hint.season === cur.number ? hint.episode : null);
+      const cb = target != null && eps.querySelector(`input[value="${target}"]`);
+      if (cb) { cb.checked = true; upd(); }
       focusPick();
     } catch (err) { pick.innerHTML = `<div class="hint">${esc(err.message)}</div>`; }
   }
@@ -553,7 +578,7 @@ function openModal(s) {
   const cur = s.items[0];
   searchBox($("#mBody"), s.id, cur?.title || sh.q, cur?.kind === "episode"
     ? {season: cur.season, episode: cur.episode, episodeTitle: cur.episode_title || `Episode ${cur.episode}`}
-    : {season: s.hint_season, episode: s.hint_episode, episodeTitle: sh.episodeTitle});
+    : {season: s.hint_season, episode: s.hint_episode, episodeTitle: sh.episodeTitle, reportedBy: s.app_name});
 }
 function closeModal() { modal.classList.remove("on"); $("#mBody").innerHTML = ""; }
 $("#mClose").onclick = closeModal;
