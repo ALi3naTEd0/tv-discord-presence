@@ -120,6 +120,11 @@ const api = async (path, body) => {
   return j;
 };
 const SRC = {tv: "LG TV", androidtv: "Android TV", plex: "Plex"};
+// Apps whose media session puts the episode name first and the show second (HBO Max: "Duty Calls" · "The Mad Pooper")
+const SHOW_SECOND = new Set(["com.wbd.stream", "com.hbo.hbonow", "com.disney.disneyplus", "com.amazon.amazonvideo.livingroom"]);
+const searchHint = s => SHOW_SECOND.has(s.app_id) && s.hint_extra
+  ? {q: s.hint_extra, alt: s.hint_title, episodeTitle: s.hint_title}
+  : {q: s.hint_title || "", alt: s.hint_extra, episodeTitle: null};
 let state = null, filter = "all", nowKeys = {};
 let src = (() => { try { return localStorage.getItem("src") || "all"; } catch { return "all"; } })();
 const inSrc = s => src === "all" || (s.source || "tv") === src;
@@ -251,10 +256,12 @@ function renderNowCard(box, s) {
       ? `The device reports <b>${esc(s.hint_title)}</b>${s.hint_extra ? ` · <span class="meta">${esc(s.hint_extra)}</span>` : ""}. Pick the right match below.`
       : "What are you watching? Identify it and Discord will show it."}${["com.google.android.youtube.tv", "youtube.leanback.v4"].includes(s.app_id)
       ? `<br><span class="hint">YouTube is kept only if it runs 20+ min or you identify it; clips are dropped.</span>` : ""}</div>`;
-    const wrap = document.createElement("div"); body.appendChild(wrap); searchBox(wrap, s.id, s.hint_title || "");
-    if (s.hint_extra) {   // YouTube often hides the real title in the second line: one-click search with it
+    const sh = searchHint(s);
+    const wrap = document.createElement("div"); body.appendChild(wrap);
+    searchBox(wrap, s.id, sh.q, {season: s.hint_season, episode: s.hint_episode, episodeTitle: sh.episodeTitle});
+    if (sh.alt) {   // the other line: YouTube often hides the real title there
       const alt = document.createElement("div"); alt.className = "chips"; alt.style.marginTop = "8px";
-      alt.innerHTML = `<span class="meta">Search instead:</span>` + [s.hint_extra, ...s.hint_extra.split(/\s(?:en|in|de|of)\s|[:|–—-]/)]
+      alt.innerHTML = `<span class="meta">Search instead:</span>` + [sh.alt, ...sh.alt.split(/\s(?:en|in|de|of)\s|[:|–—-]/)]
         .map(t => t.trim()).filter((t, i, a) => t.length >= 4 && a.indexOf(t) === i)
         .map(t => `<button class="chip src altq">${esc(t)}</button>`).join("");
       wrap.prepend(alt);
@@ -440,6 +447,16 @@ function searchBox(container, sid, initial, hint = {}) {
     try {
       const {seasons} = await api(`/api/tmdb/tv/${x.ids.tmdb}`);
       const regular = seasons.filter(s => s.number > 0);
+      const norm = t => (t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (hint.episodeTitle && hint.season == null) {   // e.g. HBO reports "Duty Calls": find its season
+        for (const z of regular.slice(0, 12)) {
+          try {
+            const {episodes} = await api(`/api/tmdb/tv/${x.ids.tmdb}/season/${z.number}`);
+            const hit = episodes.find(e => norm(e.name) === norm(hint.episodeTitle));
+            if (hit) { hint.season = z.number; hint.episode = hit.number; break; }
+          } catch {}
+        }
+      }
       const first = seasons.find(z => z.number === hint.season) || regular[0] || seasons[0];
       pick.innerHTML = `<div class="picker">${warn}<div class="title">${esc(x.title)}</div>
         <select class="season">${seasons.map(s => `<option value="${s.number}" ${s.number === first.number ? "selected" : ""}>${esc(s.name || "Season " + s.number)} (${s.count})</option>`).join("")}</select>
@@ -481,8 +498,9 @@ const modalOpen = () => modal.classList.contains("on");
 function openModal(s) {
   $("#mTitle").textContent = `${s.app_name} · ${dayLabel(s.started_at)} ${hhmm(s.started_at)} · ${mins(s.played_seconds)}`;
   modal.classList.add("on");
-  searchBox($("#mBody"), s.id, s.items[0]?.title || s.hint_title || "",
-            {season: s.hint_season, episode: s.hint_episode});
+  const sh = searchHint(s);
+  searchBox($("#mBody"), s.id, s.items[0]?.title || sh.q,
+            {season: s.hint_season, episode: s.hint_episode, episodeTitle: sh.episodeTitle});
 }
 function closeModal() { modal.classList.remove("on"); $("#mBody").innerHTML = ""; }
 $("#mClose").onclick = closeModal;

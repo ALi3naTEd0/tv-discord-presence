@@ -43,6 +43,7 @@ Things that cost real debugging time. Check here first.
 
 - **HDMI-CEC (LG remote controlling the box):** the box reads its CEC *physical address* from the TV only at boot or HDMI hotplug. Turning `hdmi_control_enabled` on at runtime leaves it at `0xFFFFFFFF` (no address), and in that half state Netflix lost its sound. Fix: `settings put global hdmi_control_enabled 1`, then **reboot the box**; it comes back with `physical_address: 0x1000` and the TV's key presses show up as `<User Control Pressed>` in `dumpsys hdmi_control`. SIMPLINK must be on in the LG (it was, the whole time).
 - YouTube uploads of films often carry a misleading first line and the real title in the second one (e.g. `Bodega El Capricho de José Gordón` · `nº1 en Steak Revolution` = *Steak (R)evolution*). Both lines are stored (`hint_title`, `hint_extra`) and the now card offers the second line as one-click searches. Never match automatically from these titles: the user decides.
+- HBO Max (and likely Disney+ / Prime Video) publish the **episode** name first and the **show** second (`Duty Calls` · `The Mad Pooper`). The dashboard pre-fills the search with the show for those apps and pre-checks the episode whose TMDB name matches; the user still confirms.
 - Netflix registers a media session but with `metadata: null`: state and position only, no title.
 
 ## HBO Max
