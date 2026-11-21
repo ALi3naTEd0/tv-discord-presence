@@ -43,7 +43,9 @@ button:disabled{opacity:.5;cursor:default}
 .bar{height:6px;background:#0c0e12;border-radius:99px;overflow:hidden;margin-top:12px}
 .bar span{display:block;height:100%;background:var(--acc);border-radius:99px}
 .chip.src{color:var(--tx)}
-.chip.alt{cursor:pointer;color:var(--acc);border-style:dashed}
+.altrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
+.altbtn{font-size:13px;padding:4px 10px;border:1px solid var(--acc);border-radius:9px;color:var(--acc);cursor:pointer;background:var(--card)}
+.altbtn:hover{background:var(--acc);color:#0b1020}
 .actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
 .actions button{font-size:13px;padding:5px 10px}
 .day{color:var(--mut);font-size:13px;margin:18px 2px 8px;text-transform:capitalize}
@@ -251,7 +253,9 @@ function renderNowCard(box, s) {
       try { const r = await api(`/api/sessions/${s.id}/next`, {}); toast(`Now: S${r.season} · E${r.episode}`); await refresh(); }
       catch (err) { toast(err.message); e.target.disabled = false; }
     });
-    $(".nowChange", body).addEventListener("click", () => { body.innerHTML = ""; searchBox(body, s.id, it.title); });
+    $(".nowChange", body).addEventListener("click", () => { body.innerHTML = "";
+      searchBox(body, s.id, it.title, it.kind === "episode"
+        ? {season: it.season, episode: it.episode, episodeTitle: it.episode_title || `Episode ${it.episode}`} : {}); });
   } else {
     body.innerHTML = `<div class="meta" style="margin-bottom:8px">${s.hint_title
       ? `The device reports <b>${esc(s.hint_title)}</b>${s.hint_extra ? ` · <span class="meta">${esc(s.hint_extra)}</span>` : ""}. Pick the right match below.`
@@ -399,13 +403,16 @@ function searchBox(container, sid, initial, hint = {}) {
         <div class="chips"><span class="chip src">${esc(x.label)}</span>
           ${x.src.includes("tmdb") ? `<span class="chip src">TMDB</span>` : ""}${x.src.includes("imdb") ? `<span class="chip src">IMDb</span>` : ""}
           ${existsChip("Trakt", x.exists.trakt)}${existsChip("Simkl", x.exists.simkl)}
-          ${(x.alts || []).map((a, j) => `<span class="chip alt" data-alt="${j}" title="Same work, listed separately on TMDB. Use this listing instead">also as ${esc(a.label)} ↗</span>`).join("")}</div>
+        </div>
+        ${(x.alts || []).map((a, j) => `<div class="altrow"><span class="meta">Also listed as ${esc(a.label)}</span>
+          <span class="altbtn" role="button" tabindex="0" data-alt="${j}">${a.kind === "tv" ? "Series · pick episode →" : `Use the ${esc(a.label)} listing →`}</span>
+          ${existsChip("Trakt", a.exists?.trakt)}${existsChip("Simkl", a.exists?.simkl)}</div>`).join("")}
         ${x.overview ? `<p>${esc(x.overview)}</p>` : ""}</div></button>`).join("") +
         (r.errors.length ? `<div class="hint">Warnings: ${esc(r.errors.join("; "))}</div>` : "");
       out.onclick = e => {
         const b = e.target.closest(".res"); if (!b) return;
         if (b.style.display === "none") return;
-        const alt = e.target.closest(".alt"), x = r.results[+b.dataset.i];
+        const alt = e.target.closest(".altbtn"), x = r.results[+b.dataset.i];
         choose(alt ? {...x.alts[+alt.dataset.alt], src: x.src} : x, +b.dataset.i);
       };
     } catch (err) { if (my === seq) out.innerHTML = `<div class="hint">${esc(err.message)}</div>`; }
@@ -502,8 +509,10 @@ function openModal(s) {
   $("#mTitle").textContent = `${s.app_name} · ${dayLabel(s.started_at)} ${hhmm(s.started_at)} · ${mins(s.played_seconds)}`;
   modal.classList.add("on");
   const sh = searchHint(s);
-  searchBox($("#mBody"), s.id, s.items[0]?.title || sh.q,
-            {season: s.hint_season, episode: s.hint_episode, episodeTitle: sh.episodeTitle});
+  const cur = s.items[0];
+  searchBox($("#mBody"), s.id, cur?.title || sh.q, cur?.kind === "episode"
+    ? {season: cur.season, episode: cur.episode, episodeTitle: cur.episode_title || `Episode ${cur.episode}`}
+    : {season: s.hint_season, episode: s.hint_episode, episodeTitle: sh.episodeTitle});
 }
 function closeModal() { modal.classList.remove("on"); $("#mBody").innerHTML = ""; }
 $("#mClose").onclick = closeModal;

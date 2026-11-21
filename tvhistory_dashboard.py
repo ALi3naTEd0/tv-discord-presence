@@ -288,8 +288,10 @@ def exists_trakt(rec: dict):
         if not ids.get(src) or (src == "tvdb" and t == "movie"):
             continue
         st, j = http_json("GET", f"https://api.trakt.tv/search/{src}/{ids[src]}?type={t}", trakt_headers(False))
-        if st == 200 and isinstance(j, list) and j:
-            return j[0][t]["ids"].get("trakt")
+        # an IMDb id shared by a movie and a series returns the movie even with type=show: filter by type
+        hit = next((x for x in j if x.get("type") == t and x.get(t)), None) if st == 200 and isinstance(j, list) else None
+        if hit:
+            return hit[t]["ids"].get("trakt")
         answered = answered or st == 200
     return False if answered else None  # False = asked and missing; None = could not ask
 
@@ -963,7 +965,16 @@ def item_runtime(it) -> int | None:
         if it["kind"] == "movie":
             return tmdb(f"/movie/{it['tmdb']}").get("runtime") or None
         eps = tmdb(f"/tv/{it['tmdb']}/season/{it['season']}").get("episodes", [])
-        return next((e.get("runtime") for e in eps if e.get("episode_number") == it["episode"]), None) or None
+        rt = next((e.get("runtime") for e in eps if e.get("episode_number") == it["episode"]), None)
+        if rt:
+            return rt
+        show = tmdb(f"/tv/{it['tmdb']}")   # fall back to the show's typical episode length
+        rt = (show.get("episode_run_time") or [None])[0] or (show.get("last_episode_to_air") or {}).get("runtime")
+        if not rt and show.get("number_of_episodes") == 1 and it["imdb"]:
+            # a one-episode "series" that TMDB also lists as a movie (same IMDb id): use the movie's runtime
+            mv = tmdb(f"/find/{it['imdb']}", external_source="imdb_id").get("movie_results") or []
+            rt = tmdb(f"/movie/{mv[0]['id']}").get("runtime") if mv else None
+        return rt or None
     except Exception:
         return None
 
