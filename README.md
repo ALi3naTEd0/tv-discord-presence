@@ -5,7 +5,7 @@ A small self-hosted stack for people who watch on an **LG webOS TV** and track w
 | Piece | What it does |
 |---|---|
 | `tvpresence.py` | Reads the foreground app and play/pause state from the TV, shows it as Discord Rich Presence (`Watching HBO Max`), and records every viewing session into a local SQLite history. |
-| `tvhistory_dashboard.py` + `.html` | Local web dashboard (port 7790) to identify those sessions (search TMDB + IMDb at once, or paste an ID/link), push them to Trakt and Simkl **by external ID**, verify they landed, import Plex plays, and show a live *Now on Plex* card. Once a session is identified, the Discord presence shows the real title and poster. |
+| `tvhistory_dashboard.py` + `.html` | Local web dashboard (port 7790) to identify those sessions (search TMDB + IMDb at once, or paste an ID/link), push them to Trakt and Simkl **by external ID** (automatically when an identified session ends and at least 80 % of its runtime was played), verify they landed, import Plex plays, and show a live *Now on Plex* card. Once a session is identified, the Discord presence shows the real title and poster. |
 | `tvhistory_db.py` | Shared SQLite schema (`~/.local/share/tvpresence/history.db`). The database is the source of truth between the two processes. |
 | `tvsync_reconcile.py` | One-off CLI that reconciles the **full** Trakt ↔ Simkl history, with Plex as a witness. Dry-run by default. |
 
@@ -100,7 +100,7 @@ An Android TV / Google TV box (tested: Xiaomi Mi Box, Android 11) is read over *
 
 **What it reads:** the foreground app (`dumpsys activity`), the screen state (`dumpsys power`), and the app's **media session** (`dumpsys media_session`): playing/paused, position and, when the app publishes it, **title and subtitle**. That title is stored as a hint and pre-fills the picker. Netflix does not publish a title (only state and position); music apps like Spotify do.
 
-**YouTube** (on the box and on the LG) is recorded too, but a session is only kept if it ran **20+ minutes** or you identified it, so documentaries and films posted on YouTube can be matched and sent to Trakt/Simkl. Shorter ones are not deleted right away: they sit under the **Short** filter for 7 days in case one was a short film, and on the box a title that exactly matches a TMDB title is moved back to the main list automatically. On the box the picker is pre-filled with the video title; the LG gives no title, so you type it.
+**YouTube** (on the box and on the LG) is recorded too, but a session is only kept if it ran **20+ minutes** or you identified it, so documentaries and films posted on YouTube can be matched and sent to Trakt/Simkl. Shorter ones are not deleted right away: they sit under the **Short** filter for 7 days in case one was a short film. Nothing is matched automatically: YouTube titles are too unreliable, you pick the match. On the box the picker is pre-filled with the video title; the LG gives no title, so you type it.
 
 **Discord:** when an app publishes its title (YouTube: video + channel), Discord shows it directly, even for apps that are not recorded in the history. The box's activity is shown when the LG itself has nothing streaming in front (e.g. the LG is on the box's HDMI input). Plex and Spotify on the box are never shown or recorded (DRPP and the Plex importer cover Plex).
 

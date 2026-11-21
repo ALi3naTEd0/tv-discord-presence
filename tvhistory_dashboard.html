@@ -164,7 +164,8 @@ function renderHeader() {
   const px = state.plex || {};
   const plexTxt = !px.enabled ? "" : px.error ? ` · Plex: ${px.error}`
     : px.last_run ? ` · Plex checked ${hhmm(px.last_run)}` : "";
-  $("#stats").textContent = `${n} sessions (60 days) · ${unid} unidentified · ${state.pending} pending${state.waiting ? ` (${state.waiting} not listed yet)` : ""}${plexTxt}`;
+  const autoTxt = state.auto_push ? ` · auto-send on (≥${Math.round(state.auto_push * 100)}% watched)` : " · auto-send off";
+  $("#stats").textContent = `${n} sessions (60 days) · ${unid} unidentified · ${state.pending} pending${state.waiting ? ` (${state.waiting} not listed yet)` : ""}${autoTxt}${plexTxt}`;
   $("#plexImport").style.display = px.enabled ? "" : "none";
   const b = $("#pushAll"); b.textContent = state.pending ? `Send pending (${state.pending})` : "Nothing pending";
   b.disabled = !state.pending;

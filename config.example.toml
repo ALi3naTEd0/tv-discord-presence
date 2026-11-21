@@ -32,6 +32,8 @@ show_when_browsing = false
 # plex_interval    = 300           # seconds between Plex imports
 # plex_import_days = 7             # look-back window on the first import
 # plex_db          = ""            # default depends on the OS (see README → Platforms)
+# auto_push        = true          # send identified sessions to Trakt/Simkl when they end
+# auto_push_min_ratio = 0.8        # ...only if this share of the TMDB runtime was played (Plex views always qualify)
 # --- credentials ---
 # env_files        = []            # extra .env files with TMDB_API_KEY / PLEX_TOKEN (the config dir's .env is always read)
 # trakt_python     = ""            # trakt-scrobbler venv python; auto-detected via `pipx environment`

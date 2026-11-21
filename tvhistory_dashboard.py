@@ -58,6 +58,8 @@ def load_cfg() -> dict:
         "env_files": [Path(p).expanduser() for p in h.get("env_files", [])],   # extra .env files with keys
         "trakt_python": h.get("trakt_python", ""),              # python of trakt-scrobbler's venv (auto-detected)
         "simkl_dir": Path(h.get("simkl_dir", "~/.config/simkl")).expanduser(),  # .env (SIMKL_CLIENT_ID) + token.json
+        "auto_push": bool(h.get("auto_push", True)),            # send identified sessions when they end
+        "auto_push_min_ratio": float(h.get("auto_push_min_ratio", 0.8)),  # watched share of the runtime
     }
 
 
@@ -922,43 +924,75 @@ def trakt_watching() -> dict | None:
 SHORT_KEEP_DAYS = 7
 
 
-def title_matches_tmdb(*texts) -> bool:
-    """YouTube uploads often bury the real title ("Bodega X — nº1 en Steak Revolution").
-    True if a TMDB movie/show title equals one of the texts, or (8+ chars) appears inside one."""
-    norm = lambda t: re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
-    texts = [t for t in texts if t]
-    hay = [norm(t) for t in texts]
-    queries = list(texts)
-    for t in texts:  # also try the part after "en"/"in"/":"/"|"/"-" separators, e.g. "nº1 en Steak Revolution"
-        queries += [p for p in re.split(r"\s(?:en|in|de|of)\s|[:|\-–—]", t) if len(p.strip()) >= 6]
-    for q in dict.fromkeys(x.strip() for x in queries):
-        try:
-            hits = tmdb("/search/multi", query=q).get("results", [])[:5]
-        except Exception:
-            continue
-        for h in hits:
-            if h.get("media_type") not in ("movie", "tv"):
-                continue
-            n = norm(h.get("title") or h.get("name"))
-            sq = n.replace(" ", "")  # "Steak (R)evolution" vs "Steak Revolution": compare without spaces/signs
-            if n and any(n == x or (len(sq) >= 8 and sq in x.replace(" ", "")) for x in hay):
-                return True
-    return False
-
-
 def tidy_short_sessions() -> None:
-    """Short YouTube sessions (auto_hidden): promote the ones whose title matches a TMDB title
-    exactly (likely a short film or a full movie), purge the rest after SHORT_KEEP_DAYS."""
+    """Short YouTube sessions (auto_hidden): purge the unidentified ones after SHORT_KEEP_DAYS.
+    No automatic matching: YouTube titles are too unreliable, the user picks the match."""
     conn = db.connect()
     conn.execute("DELETE FROM sessions WHERE auto_hidden=1 AND ended_at < ? AND id NOT IN (SELECT session_id FROM items)",
                  (time.time() - SHORT_KEEP_DAYS * 86400,))
-    norm = lambda t: re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
-    for s in conn.execute("SELECT id, hint_title, hint_extra FROM sessions WHERE auto_hidden=1 AND hint_title IS NOT NULL"
-                          " AND COALESCE(media_id,'') != 'checked'").fetchall():
-        if title_matches_tmdb(s["hint_title"], s["hint_extra"]):
-            conn.execute("UPDATE sessions SET auto_hidden=0 WHERE id=?", (s["id"],))
-        else:
-            conn.execute("UPDATE sessions SET media_id='checked' WHERE id=?", (s["id"],))  # don't ask TMDB again
+
+
+def expected_seconds(items) -> float | None:
+    """Total runtime of a session's items according to TMDB (None if any is unknown)."""
+    total = 0.0
+    for it in items:
+        try:
+            if it["kind"] == "movie":
+                rt = tmdb(f"/movie/{it['tmdb']}").get("runtime") if it["tmdb"] else None
+            else:
+                eps = tmdb(f"/tv/{it['tmdb']}/season/{it['season']}").get("episodes", []) if it["tmdb"] else []
+                rt = next((e.get("runtime") for e in eps if e.get("episode_number") == it["episode"]), None)
+        except Exception:
+            rt = None
+        if not rt:
+            return None
+        total += rt * 60
+    return total
+
+
+def auto_push() -> None:
+    """Send identified sessions once they end, like a scrobble would: TV/Android TV sessions only if
+    at least auto_push_min_ratio of the runtime was played; Plex views always (Plex already marked
+    them watched). Already-present plays are detected first (verify), so nothing is duplicated."""
+    if not CFG["auto_push"]:
+        return
+    conn = db.connect()
+    rows = conn.execute(
+        "SELECT * FROM sessions WHERE state='closed' AND ignored=0 AND auto_hidden=0 AND ended_at < ?"
+        " AND id IN (SELECT session_id FROM items WHERE trakt_status IN ('pending','ready','error')"
+        "   OR simkl_status IN ('pending','ready','error')"
+        "   OR ((trakt_status='not_found' OR simkl_status='not_found') AND COALESCE(pushed_at,0) < ?))",
+        (time.time() - 60, time.time() - 86400)).fetchall()
+    ready = []
+    for sess in rows:
+        items = conn.execute("SELECT * FROM items WHERE session_id=?", (sess["id"],)).fetchall()
+        if sess["source"] != "plex":
+            exp = expected_seconds(items)
+            ratio = sess["played_seconds"] / exp if exp else None
+            if ratio is None or ratio < CFG["auto_push_min_ratio"]:
+                note = (f"Watched {ratio:.0%} of the runtime (< {CFG['auto_push_min_ratio']:.0%}): not sent automatically"
+                        if ratio is not None else "Runtime unknown: not sent automatically")
+                conn.execute("UPDATE items SET trakt_error=CASE WHEN trakt_status IN ('pending','ready') THEN ? ELSE trakt_error END,"
+                             " simkl_error=CASE WHEN simkl_status IN ('pending','ready') THEN ? ELSE simkl_error END"
+                             " WHERE session_id=?", (note, note, sess["id"]))
+                continue
+        ready.append(sess["id"])
+    if not ready:
+        return
+    api_verify(ready)              # marks what is already in your history as added
+    r = api_push({"session_ids": ready})
+    sent = [x for x in r.get("results", []) if x.get("status") == "added"]
+    if sent:
+        print(f"Auto-sent: {', '.join(sorted({x['label'] + ' → ' + x['target'] for x in sent}))}", flush=True)
+
+
+def auto_loop() -> None:
+    while True:
+        time.sleep(120)
+        try:
+            auto_push()
+        except Exception as e:
+            print(f"Auto-send: {e}", flush=True)
 
 
 def plex_loop() -> None:
@@ -1257,7 +1291,7 @@ def api_state(days: int) -> dict:
         pnow = plex_now() if CFG["plex"] else []
     except Exception:
         pnow = []
-    return {"now": now, "nows": nows, "sessions": sessions, "pending": pending, "waiting": waiting, "server_time": time.time(),
+    return {"now": now, "nows": nows, "auto_push": CFG["auto_push"] and CFG["auto_push_min_ratio"], "sessions": sessions, "pending": pending, "waiting": waiting, "server_time": time.time(),
             "plex": {"enabled": CFG["plex"], **PLEX_STATUS}, "plex_now": pnow}
 
 
@@ -1365,6 +1399,7 @@ def main() -> None:
         threading.Thread(target=plex_loop, name="plex", daemon=True).start()  # imports and verifies
     else:
         verify_bg()
+    threading.Thread(target=auto_loop, name="auto", daemon=True).start()   # sends what ended
     srv = ThreadingHTTPServer((CFG["bind"], CFG["port"]), Handler)
     print(f"TV History on http://{CFG['bind']}:{CFG['port']}", flush=True)
     srv.serve_forever()

@@ -25,7 +25,7 @@ Repo: `~/tv-discord-presence` (GitHub `ALi3naTEd0/tv-discord-presence`). Full do
 
 ## Hard rules
 
-1. **No writes to Trakt or Simkl without the user's explicit OK** for that specific push/delete. `/api/push`, `apply --yes` and `delete --yes` all write. Verify (`/api/verify`) and dry runs are fine.
+1. **No writes to Trakt or Simkl without the user's explicit OK** for that specific push/delete, except the dashboard's own auto-send of identified sessions (user-approved, 2026-11-20). `/api/push`, `apply --yes` and `delete --yes` all write. **Never match/identify automatically** — the user picks every match. Verify (`/api/verify`) and dry runs are fine.
 2. **Never refresh the Trakt token.** It belongs to trakt-scrobbler (single-use refresh tokens). If expired: tell the user to run `trakts auth`.
 3. Never print tokens or `.env` contents.
 4. Keep the dashboard bound to `127.0.0.1`; expose only via `tailscale serve`.
@@ -82,7 +82,7 @@ Identify only writes the local DB (then runs a background verify). Prefer lettin
 **"Wasn't scrobbled / not on Trakt or Simkl"**
 1. Run verify: `curl -s "${H[@]}" -X POST 127.0.0.1:7790/api/verify -d '{}'`.
 2. Read statuses: `added` (there), `ready` (title exists on the service, not in history → can push), `not_found` (title missing on that service — wait or request it there), `error`.
-3. Only after the user says so: `POST /api/push` with `{"session_ids":[...], "targets":["trakt","simkl"]}`; `{"dry_run":true}` previews without writing.
+3. Identified sessions are **auto-sent when they end** (≥80 % of the TMDB runtime played; Plex always). Manual sends beyond that only after the user says so: `POST /api/push` with `{"session_ids":[...], "targets":["trakt","simkl"]}`; `{"dry_run":true}` previews without writing.
 4. If it came from Plex, remember trakt-scrobbler may already have scrobbled it; the push dedupes Trakt for Plex items.
 5. Trakt only writes history on a stop at ≥80 %; partial plays sit in `/sync/playback`.
 
