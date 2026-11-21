@@ -73,6 +73,7 @@ DEFAULT_HISTORY = {
     # After a service restart, resume the open session if seen less than this ago
     "resume_window": 600,
 }
+REOPEN_WITHIN = 6 * 3600  # s; same title back on Android TV within this: continue the old session
 MAX_TICK_GAP = 30  # s; after suspend or a dropout the gap is not counted as playback
 
 SYSTEM_PREFIXES = ("com.webos.", "com.lge.", "lge.", "com.lg.", "webos.")
@@ -271,8 +272,13 @@ class HistoryRecorder:
         if sess is None:
             if not playing:
                 return None
-            sess = db.open_session(self.conn, app_id, name, logo, now, media_id, source=self.source)
-            log.info("History[%s]: session %d opened (%s)", self.source, sess["id"], name)
+            if self.source == "androidtv" and media_id:
+                sess = db.reopen_recent(self.conn, self.source, app_id, media_id, REOPEN_WITHIN, now)
+                if sess:
+                    log.info("History[%s]: session %d resumed (%s, same title)", self.source, sess["id"], name)
+            if sess is None:
+                sess = db.open_session(self.conn, app_id, name, logo, now, media_id, source=self.source)
+                log.info("History[%s]: session %d opened (%s)", self.source, sess["id"], name)
             self._prev_playing = False  # the previous interval was not playback
         if hint and hint[0] and not sess["hint_title"]:
             db.set_hint(self.conn, sess["id"], *hint)

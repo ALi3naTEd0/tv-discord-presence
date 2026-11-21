@@ -150,8 +150,11 @@ const ST = {
   not_found: ["warn", "not listed yet"], error: ["bad", "error"],
 };
 const statusChip = (svc, it) => {
-  const s = it[`${svc}_status`], [cls, txt] = ST[s] || ["", s];
-  const err = it[`${svc}_error`];
+  const s = it[`${svc}_status`], err = it[`${svc}_error`];
+  let [cls, txt] = ST[s] || ["", s];
+  const held = ["pending", "ready"].includes(s) && /^Watched (\d+)%/.exec(err || "");
+  if (held) [cls, txt] = ["warn", `held · ${held[1]}% watched`];   // auto-send waits for 80%
+  else if (["pending", "ready"].includes(s) && /^Runtime unknown/.test(err || "")) [cls, txt] = ["warn", "held · runtime unknown"];
   return `<span class="chip ${cls}" ${err ? `title="${esc(err)}"` : ""}>${svc === "trakt" ? "Trakt" : "Simkl"} ${txt}</span>`;
 };
 const sessKind = s => {

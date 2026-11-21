@@ -152,6 +152,19 @@ def touch(conn, sid: int, now: float, played_add: float, playing: bool) -> None:
         )
 
 
+def reopen_recent(conn, source: str, app_id: str, media_id: str, within: float, now: float) -> sqlite3.Row | None:
+    """Coming back to the same title (Android TV publishes it) after a pause or another app:
+    continue that session instead of starting a new, unidentified one."""
+    row = conn.execute(
+        "SELECT * FROM sessions WHERE state='closed' AND source=? AND app_id=? AND media_id=? AND ignored=0"
+        " AND ended_at > ? ORDER BY ended_at DESC LIMIT 1", (source, app_id, media_id, now - within)).fetchone()
+    if row is None:
+        return None
+    conn.execute("UPDATE sessions SET state='open', ended_at=NULL, auto_hidden=0, last_seen_at=? WHERE id=?",
+                 (now, row["id"]))
+    return conn.execute("SELECT * FROM sessions WHERE id=?", (row["id"],)).fetchone()
+
+
 def set_position(conn, sid: int, pos: float) -> None:
     conn.execute("UPDATE sessions SET position=? WHERE id=? AND state='open'", (pos, sid))
 
