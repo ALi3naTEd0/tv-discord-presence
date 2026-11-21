@@ -351,7 +351,7 @@ def resolve_id(q: str) -> list[dict] | None:
     return None
 
 
-def search_all(q: str) -> dict:
+def search_all(q: str, prefer: str | None = None) -> dict:
     errors = []
     recs = resolve_id(q)
     if recs is None:
@@ -391,16 +391,18 @@ def search_all(q: str) -> dict:
     for rec, ex in zip(merged, POOL.map(check, merged)):
         rec["exists"] = ex
         rec["src"] = sorted(rec["src"])
-    return {"results": collapse_listings(merged), "errors": errors}
+    return {"results": collapse_listings(merged, prefer), "errors": errors}
 
 
-def collapse_listings(recs: list) -> list:
+def collapse_listings(recs: list, prefer: str | None = None) -> list:
     """The same work listed twice (TMDB has it as a movie AND a one-episode series, same IMDb id):
     keep one card, the listing that exists on most services (that is where it will be sent),
     then the one with a TVDB id; the other stays reachable as an alternative."""
     def score(r):
         ex = r.get("exists") or {}
-        return (bool(ex.get("trakt")) + bool(ex.get("simkl")), bool(r["ids"].get("tvdb")), "imdb" in r["src"])
+        # prefer="tv": the device reported an episode (HBO "Duty Calls" of "The Mad Pooper"), so the
+        # series listing is the right one even if a service only has the movie listing (yet)
+        return (r["kind"] == prefer, bool(ex.get("trakt")) + bool(ex.get("simkl")), bool(r["ids"].get("tvdb")), "imdb" in r["src"])
     out: list[dict] = []
     for r in recs:
         imdb = r["ids"].get("imdb")
@@ -1360,7 +1362,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, api_state(int(qs.get("days", ["60"])[0])))
             if u.path == "/api/search":
                 q = (qs.get("q", [""])[0]).strip()
-                return self.send(200, search_all(q) if len(q) >= 2 else {"results": [], "errors": []})
+                prefer = (qs.get("prefer") or [""])[0] or None
+                return self.send(200, search_all(q, prefer if prefer in ("tv", "movie") else None)
+                                 if len(q) >= 2 else {"results": [], "errors": []})
             m = re.fullmatch(r"/api/tmdb/tv/(\d+)", u.path)
             if m:
                 d = tmdb(f"/tv/{m.group(1)}")

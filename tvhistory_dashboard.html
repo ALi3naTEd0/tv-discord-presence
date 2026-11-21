@@ -390,7 +390,7 @@ function searchBox(container, sid, initial, hint = {}) {
     if (q.length < 2) { out.innerHTML = ""; return; }
     const my = ++seq; out.innerHTML = `<div class="hint"><span class="spin"></span> Searching TMDB, IMDb, Trakt and Simkl…</div>`;
     try {
-      const r = await api(`/api/search?q=${encodeURIComponent(q)}`);
+      const r = await api(`/api/search?q=${encodeURIComponent(q)}${hint.episodeTitle ? "&prefer=tv" : ""}`);
       if (my !== seq) return;
       if (!r.results.length) { out.innerHTML = `<div class="hint">No results${r.errors.length ? " (" + esc(r.errors.join("; ")) + ")" : ""}. Try another title, the IMDb ID, or manual entry.</div>`; return; }
       out.innerHTML = r.results.map((x, i) => `<button class="res" data-i="${i}">
