@@ -105,7 +105,8 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
                       ("hint_title", "TEXT"),                     # what the source said, when it could not be identified
                       ("hint_season", "INTEGER"),
                       ("hint_episode", "INTEGER"),
-                      ("auto_hidden", "INTEGER NOT NULL DEFAULT 0")):  # short clip kept 7 days under "Short"
+                      ("auto_hidden", "INTEGER NOT NULL DEFAULT 0"),
+                      ("hint_extra", "TEXT")):   # the device's second line (channel / tagline): YouTube hides real titles there  # short clip kept 7 days under "Short"
         if col not in cols:
             try:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {decl}")
@@ -151,8 +152,9 @@ def set_media(conn, sid: int, media_id: str) -> None:
 
 def set_hint(conn, sid: int, title: str | None, subtitle: str | None = None) -> None:
     """What the device itself reports as playing (Android media session); pre-fills the picker."""
-    if title:  # the subtitle is often a channel or a tagline: keep the search clean
-        conn.execute("UPDATE sessions SET hint_title=? WHERE id=? AND state='open'", (title, sid))
+    if title:  # second line kept apart: often a channel, but YouTube uploads hide the real title there
+        conn.execute("UPDATE sessions SET hint_title=?, hint_extra=? WHERE id=? AND state='open'",
+                     (title, subtitle, sid))
 
 
 def has_items(conn, sid: int) -> bool:

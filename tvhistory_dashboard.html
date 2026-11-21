@@ -247,10 +247,19 @@ function renderNowCard(box, s) {
     $(".nowChange", body).addEventListener("click", () => { body.innerHTML = ""; searchBox(body, s.id, it.title); });
   } else {
     body.innerHTML = `<div class="meta" style="margin-bottom:8px">${s.hint_title
-      ? `The device reports <b>${esc(s.hint_title)}</b>. Pick the right match below.`
+      ? `The device reports <b>${esc(s.hint_title)}</b>${s.hint_extra ? ` · <span class="meta">${esc(s.hint_extra)}</span>` : ""}. Pick the right match below.`
       : "What are you watching? Identify it and Discord will show it."}${["com.google.android.youtube.tv", "youtube.leanback.v4"].includes(s.app_id)
       ? `<br><span class="hint">YouTube is kept only if it runs 20+ min or you identify it; clips are dropped.</span>` : ""}</div>`;
     const wrap = document.createElement("div"); body.appendChild(wrap); searchBox(wrap, s.id, s.hint_title || "");
+    if (s.hint_extra) {   // YouTube often hides the real title in the second line: one-click search with it
+      const alt = document.createElement("div"); alt.className = "chips"; alt.style.marginTop = "8px";
+      alt.innerHTML = `<span class="meta">Search instead:</span>` + [s.hint_extra, ...s.hint_extra.split(/\s(?:en|in|de|of)\s|[:|–—-]/)]
+        .map(t => t.trim()).filter((t, i, a) => t.length >= 4 && a.indexOf(t) === i)
+        .map(t => `<button class="chip src altq">${esc(t)}</button>`).join("");
+      wrap.prepend(alt);
+      alt.addEventListener("click", e => { const b = e.target.closest(".altq"); if (!b) return;
+        const inp = $(".search>input", wrap); inp.value = b.textContent; inp.dispatchEvent(new Event("input")); });
+    }
   }
 }
 

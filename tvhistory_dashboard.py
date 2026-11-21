@@ -922,6 +922,30 @@ def trakt_watching() -> dict | None:
 SHORT_KEEP_DAYS = 7
 
 
+def title_matches_tmdb(*texts) -> bool:
+    """YouTube uploads often bury the real title ("Bodega X — nº1 en Steak Revolution").
+    True if a TMDB movie/show title equals one of the texts, or (8+ chars) appears inside one."""
+    norm = lambda t: re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+    texts = [t for t in texts if t]
+    hay = [norm(t) for t in texts]
+    queries = list(texts)
+    for t in texts:  # also try the part after "en"/"in"/":"/"|"/"-" separators, e.g. "nº1 en Steak Revolution"
+        queries += [p for p in re.split(r"\s(?:en|in|de|of)\s|[:|\-–—]", t) if len(p.strip()) >= 6]
+    for q in dict.fromkeys(x.strip() for x in queries):
+        try:
+            hits = tmdb("/search/multi", query=q).get("results", [])[:5]
+        except Exception:
+            continue
+        for h in hits:
+            if h.get("media_type") not in ("movie", "tv"):
+                continue
+            n = norm(h.get("title") or h.get("name"))
+            sq = n.replace(" ", "")  # "Steak (R)evolution" vs "Steak Revolution": compare without spaces/signs
+            if n and any(n == x or (len(sq) >= 8 and sq in x.replace(" ", "")) for x in hay):
+                return True
+    return False
+
+
 def tidy_short_sessions() -> None:
     """Short YouTube sessions (auto_hidden): promote the ones whose title matches a TMDB title
     exactly (likely a short film or a full movie), purge the rest after SHORT_KEEP_DAYS."""
@@ -929,14 +953,9 @@ def tidy_short_sessions() -> None:
     conn.execute("DELETE FROM sessions WHERE auto_hidden=1 AND ended_at < ? AND id NOT IN (SELECT session_id FROM items)",
                  (time.time() - SHORT_KEEP_DAYS * 86400,))
     norm = lambda t: re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
-    for s in conn.execute("SELECT id, hint_title FROM sessions WHERE auto_hidden=1 AND hint_title IS NOT NULL"
+    for s in conn.execute("SELECT id, hint_title, hint_extra FROM sessions WHERE auto_hidden=1 AND hint_title IS NOT NULL"
                           " AND COALESCE(media_id,'') != 'checked'").fetchall():
-        try:
-            hits = tmdb("/search/multi", query=s["hint_title"]).get("results", [])
-        except Exception:
-            continue
-        if any(norm(h.get("title") or h.get("name")) == norm(s["hint_title"]) for h in hits[:5]
-               if h.get("media_type") in ("movie", "tv")):
+        if title_matches_tmdb(s["hint_title"], s["hint_extra"]):
             conn.execute("UPDATE sessions SET auto_hidden=0 WHERE id=?", (s["id"],))
         else:
             conn.execute("UPDATE sessions SET media_id='checked' WHERE id=?", (s["id"],))  # don't ask TMDB again
