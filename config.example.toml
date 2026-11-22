@@ -3,7 +3,7 @@
 tv_host = "192.168.1.220"          # LG TV IP (pin it in your router's DHCP)
 client_id = ""                     # Discord Application ID: your own app, or DRPP's "413407336082833418" (see README)
 poll_seconds = 5
-ignore_apps = ["cdp-30"]           # Plex app on webOS: covered by the Plex importer / DRPP
+ignore_apps = ["cdp-30"]           # Plex app on webOS: shown from the Plex server instead ([plex])
 only_known = false
 show_when_browsing = false
 
@@ -41,3 +41,6 @@ show_when_browsing = false
 # env_files        = []            # extra .env files with TMDB_API_KEY / PLEX_TOKEN (the config dir's .env is always read)
 # trakt_python     = ""            # trakt-scrobbler venv python; auto-detected via `pipx environment`
 # simkl_dir        = "~/.config/simkl"   # holds .env (SIMKL_CLIENT_ID) and token.json
+
+[plex]
+# presence = true                 # Discord shows what this account plays on Plex (any device), from the dashboard; false if you run DRPP

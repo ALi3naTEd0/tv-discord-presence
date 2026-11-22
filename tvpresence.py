@@ -46,7 +46,7 @@ DEFAULT_CONFIG = {
     "tv_host": "192.168.1.220",
     "client_id": "",
     "poll_seconds": 5,
-    # Apps never shown (Plex is covered by the Plex importer / DRPP)
+    # Apps never shown (Plex is shown from the Plex server, see [plex])
     "ignore_apps": ["cdp-30"],
     # Only show apps in KNOWN_APPS (true) or any non-system app (false)
     "only_known": False,
@@ -104,7 +104,7 @@ ANDROID_APPS: dict[str, tuple[str, str]] = {
     "com.spotify.tv.android": ("Spotify", "www.spotify.com"),
     "tv.mirada.iris.android.inspire.izzitv.byod": ("izzi tv", "www.izzi.mx"),   # live TV: no title, no position
 }
-# Never recorded (music, Twitch, Plex: the Plex importer and DRPP cover it).
+# Never recorded (music, Twitch, Plex: the Plex importer covers Plex, and Discord shows it from the server).
 # YouTube IS recorded on Android TV (it publishes titles); short sessions are dropped, see min_seconds_by_app
 ANDROID_EXCLUDE = ["com.spotify.tv.android", "tv.twitch.android.app",
                    "com.plexapp.android", "com.google.android.youtube.tvmusic"]
@@ -228,6 +228,23 @@ class AndroidTv:
         return (pkg, name, logo, play), title, (title, subtitle), pos
 
 log = logging.getLogger("tvpresence")
+PLEX_LOGO = FAVICON.format("www.plex.tv")
+
+
+def plex_now(port: int) -> dict | None:
+    """What this account plays on Plex right now, from the Couchlog dashboard (title, episode,
+    real position, TMDB poster). The dashboard already resolves IDs and posters, so Discord gets
+    a plain https poster URL: nothing to upload. None when nothing plays or the dashboard is down."""
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/plex_now", timeout=4) as r:
+            items = json.load(r).get("plex_now") or []
+    except Exception as e:
+        log.debug("Plex now: %s", e)
+        return None
+    items.sort(key=lambda p: p.get("state") != "playing")   # playing before paused
+    return items[0] if items else None
 
 
 def load_config() -> dict:
@@ -355,6 +372,9 @@ class TvPresence:
         a = {"port": 5555, "ignore_apps": ["com.plexapp.android", "com.spotify.tv.android"], **(cfg.get("androidtv") or {})}
         self.atv: AndroidTv | None = AndroidTv(a["host"], int(a["port"])) if a.get("host") else None
         self.atv_ignore = set(a["ignore_apps"])
+        px = {"presence": True, **(cfg.get("plex") or {})}
+        self.plex_presence = bool(px["presence"])
+        self.dashboard_port = int({**DEFAULT_HISTORY, **(cfg.get("history") or {})}.get("dashboard_port", 7790))
         self.atv_history: HistoryRecorder | None = None
         if self.atv and self.history:
             try:
@@ -542,7 +562,8 @@ class TvPresence:
             large_image=poster or logo,
             large_text=title[:128],
             small_image=logo if poster else None,
-            small_text=f"{name} on TV" if poster else None,
+            small_text=(f"{name} · {ident['device']}" if "device" in ident.keys() and ident["device"]
+                        else f"{name} on TV") if poster else None,
             start=None if paused else start,
             end=None if paused else getattr(self, "_end", None),
         )
@@ -596,6 +617,18 @@ class TvPresence:
                             log.warning("History[androidtv]: %s", e)
                     if info is None and atv_info and atv_info[0] not in self.atv_ignore:
                         info, ident, hint, pos, played = atv_info, atv_ident, atv_hint, atv_pos, atv_played
+                # Plex (any device, this account): shown when the LG has no app of its own in front
+                # and the box is not playing something else. Wins over the box's Plex app, which is ignored.
+                if info is None and self.plex_presence:
+                    p = await asyncio.to_thread(plex_now, self.dashboard_port)
+                    if p and p.get("title"):
+                        info = ("com.plexapp.android", "Plex", PLEX_LOGO, p.get("state") or "playing")
+                        ident = {"id": "plex", "kind": p.get("kind"), "title": p["title"], "year": p.get("year"),
+                                 "season": p.get("season"), "episode": p.get("episode"),
+                                 "episode_title": p.get("episode_title"), "poster": p.get("poster"),
+                                 "runtime": (p.get("duration") or 0) / 60 or None, "runtime_est": 0,
+                                 "device": p.get("device")}
+                        hint, pos, played = None, p.get("offset"), None
                 # reset the timer when the app leaves the foreground
                 active = info[0] if info else None
                 for a in list(self.app_since):

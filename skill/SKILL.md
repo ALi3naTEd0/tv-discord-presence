@@ -21,7 +21,7 @@ Repo: `~/tv-discord-presence` (GitHub `ALi3naTEd0/tv-discord-presence`, public, 
 | Android TV box | Mi Box over ADB (`[androidtv] host`, key `adbkey`): app, state, real position, title when published, resolution/codec. Reader: `AndroidTv` in `tvpresence.py` |
 | Shared DB | `~/.local/share/tvpresence/history.db` (SQLite WAL); `source = tv` (LG) / `androidtv` / `plex` |
 | Config | `~/.config/tvpresence/config.toml` (`[history]`, `[androidtv]`), secrets in `.env` or `[history] env_files` |
-| Discord app | `client_id`: DRPP's public app or the user's own (see `local.md`). Creating an app happens in the user's Discord account, so they do it |
+| Discord app | `client_id`: DRPP's public app or the user's own (see `local.md`). Plex presence comes from `tvpresence` too (TMDB posters, real position); DRPP is not used. Creating an app happens in the user's Discord account, so they do it |
 | Full reconciliation | `tvsync_reconcile.py`, output in `reconcile/` (git-ignored, personal data; known mismatches in `reconcile/known-mismatches.json`) |
 
 ## Hard rules
@@ -91,7 +91,7 @@ Mi Box over ADB (read-only checks): use the venv's `adb_shell` with `~/.config/t
 | Trakt 403 `error code: 1010` | missing custom User-Agent |
 | Trakt 401 | token expired → user runs `trakts auth` |
 | Simkl 201 but nothing added | read `not_found`; `plantowatch` = Simkl thinks it's unreleased (fix the date on TMDB) |
-| Plex playing but nothing in Discord | `journalctl --user -u drpp`: `Failed to upload image … 500` = DRPP's image host (Litterbox) is down and DRPP keeps retrying the poster; switch `images.uploaders` in `~/.config/drpp/config.yml` (ImgBB needs the user's free key) |
+| Plex not in Discord | `tvpresence` shows Plex from `/api/plex_now` (dashboard must be up) only when the LG has no app/console in front; `[plex] presence`. DRPP is retired (it needed Litterbox to upload posters and shares the Discord app): keep `drpp.service` stopped |
 | Wrong match by trakt-scrobbler | its remap file / cache `~/.local/share/trakt-scrobbler/trakt_cache.json`; back up, fix only the wrong keys, with the user's OK |
 | No sound on the box after a settings change | CEC toggled without reboot → reboot the box |
 

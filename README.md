@@ -108,7 +108,9 @@ An Android TV / Google TV box (tested: Xiaomi Mi Box, Android 11) is read over *
 
 **YouTube** (on the box and on the LG) is recorded too, but a session is only kept if it ran **20+ minutes** or you identified it, so documentaries and films posted on YouTube can be matched and sent to Trakt/Simkl. Shorter ones are not deleted right away: they sit under the **Short** filter for 7 days in case one was a short film. Nothing is matched automatically: YouTube titles are too unreliable, you pick the match. On the box the picker is pre-filled with the video title; the LG gives no title, so you type it.
 
-**Discord:** when an app publishes its title (YouTube: video + channel), Discord shows it directly, even for apps that are not recorded in the history. The box's activity is shown when the LG itself has nothing streaming in front (e.g. the LG is on the box's HDMI input). Plex and Spotify on the box are never shown or recorded (DRPP and the Plex importer cover Plex).
+**Discord:** when an app publishes its title (YouTube: video + channel), Discord shows it directly, even for apps that are not recorded in the history. The box's activity is shown when the LG itself has nothing streaming in front (e.g. the LG is on the box's HDMI input). Spotify on the box is never shown or recorded. Plex is not captured from the box either: it comes from the Plex server (next paragraph).
+
+**Plex in Discord:** whatever your account plays on Plex, on any device, shows as **Watching Plex** with the title, episode, the TMDB poster and a time bar from the server's real position. It comes from the dashboard (`/api/plex_now`, which already resolves IDs and posters), so the poster is a plain TMDB URL and nothing is uploaded anywhere. It shows when the LG has no app of its own in front (an LG app or a console wins). Turn it off with `[plex] presence = false`. This replaces [DRPP](https://github.com/phin05/discord-rich-presence-plex): DRPP only knows Plex's local artwork, so it must upload every poster to a public image host (Litterbox by default) and shows no poster when that host fails. Do not run both: they share the Discord app and step on each other.
 
 ## Game consoles
 
@@ -118,7 +120,7 @@ A console on an LG HDMI input (Nintendo Switch / Switch 2, PlayStation, Xbox) sh
 
 Rich Presence always runs under a Discord *application*, identified by its Application ID (`client_id`). The app itself does almost nothing here: the code overrides the activity name (`Watching HBO Max`) and passes logos and posters as URLs, so the app needs **no** uploaded art and no bot. Its own name only shows up as a fallback.
 
-**Option A — reuse DRPP's app (what this setup uses today).** If you already run [DRPP](https://github.com/phin05/discord-rich-presence-plex), its public Application ID `413407336082833418` (named "Plex") works as is:
+**Option A — reuse DRPP's app (what this setup uses today).** [DRPP](https://github.com/phin05/discord-rich-presence-plex)'s public Application ID `413407336082833418` (named "Plex") works as is:
 
 ```toml
 client_id = "413407336082833418"
@@ -133,7 +135,7 @@ How it works:
    - `details` / `state` → the two text lines (`Watching HBO Max` · `Playing on TV`, or title · `S1 · E2 — name`).
    - `large_image` / `small_image` as **external URLs** (app logo, TMDB poster). Discord fetches them through its media proxy, so the app needs no uploaded Rich Presence assets.
    - `start` → the elapsed-time counter (dropped while paused).
-3. DRPP and `tvpresence` each hold their own IPC connection and set their own activity. They do not step on each other in practice because `tvpresence` ignores the Plex app on the TV (`cdp-30`): Plex is DRPP's job, everything else is `tvpresence`'s.
+3. `tvpresence` shows Plex itself (see *Plex in Discord* above), so DRPP is not needed. If you keep DRPP running, set `[plex] presence = false`: two programs on the same Application ID override each other's activity.
 
 Trade-off: it is someone else's app. If its owner deletes it or changes its ID, the handshake fails and the presence stops (the service keeps retrying every 30 s and history recording is unaffected). Any Discord client that ignores the name override shows "Plex".
 

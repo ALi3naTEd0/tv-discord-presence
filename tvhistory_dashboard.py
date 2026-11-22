@@ -1502,6 +1502,8 @@ class Handler(BaseHTTPRequestHandler):
             if u.path in STATIC:
                 name, ctype = STATIC[u.path]
                 return self.send(200, raw=(STATIC_DIR / name).read_bytes(), ctype=ctype)
+            if u.path == "/api/plex_now":   # light endpoint for tvpresence (Discord)
+                return self.send(200, {"plex_now": plex_now()})
             if u.path == "/api/state":
                 return self.send(200, api_state(int(qs.get("days", ["60"])[0])))
             if u.path == "/api/search":
