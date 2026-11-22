@@ -85,7 +85,7 @@ Identify only writes the local DB (then runs a background verify). Prefer lettin
 1. Run verify: `curl -s "${H[@]}" -X POST 127.0.0.1:7790/api/verify -d '{}'`.
 2. Read statuses: `added` (there), `ready` (title exists on the service, not in history → can push), `not_found` (title missing on that service — wait or request it there), `error`.
 3. Identified sessions are **auto-sent when they end** (≥80 % of the TMDB runtime played; Plex always). Manual sends beyond that only after the user says so: `POST /api/push` with `{"session_ids":[...], "targets":["trakt","simkl"]}`; `{"dry_run":true}` previews without writing.
-4. If it came from Plex, remember trakt-scrobbler may already have scrobbled it; the push dedupes Trakt for Plex items.
+4. If it came from Plex, trakt-scrobbler may already have scrobbled it; the push dedupes Trakt for Plex items (±12 h, by ID). **Keep `trakts` running**: it owns the Trakt token the dashboard reuses (README → "Plex and trakt-scrobbler").
 5. Trakt only writes history on a stop at ≥80 %; partial plays sit in `/sync/playback`.
 
 **Plex** — import runs every 5 min; force it with `POST /api/plex/import`. "Now on Plex" reads `/status/sessions` filtered to account 1.

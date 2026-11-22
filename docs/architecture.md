@@ -1,7 +1,8 @@
 # Architecture
 
 ```
- LG webOS TV ──SSAP :3001──▶ tvpresence.py ──IPC──▶ Discord Rich Presence
+ LG webOS TV ───SSAP :3001──▶ tvpresence.py ──IPC──▶ Discord Rich Presence
+ Android TV box ──ADB :5555──▶      │
                                   │  ▲
                      sessions     │  │ identified item (title, S/E, poster)
                                   ▼  │
@@ -18,9 +19,10 @@ Both processes open the same database; neither keeps the open session in memory.
 
 ## Capture rules (`HistoryRecorder` in `tvpresence.py`)
 
-webOS only reports `appId` and `playState` (plus an opaque `mediaId`). No title, no position. So a "session" is a stretch of playback inside one app:
+webOS only reports `appId` and `playState` (plus an opaque `mediaId`): no title, no position. Android TV adds the media session (position, and a title when the app publishes one) and the decoder's resolution/codec. Either way a "session" is a stretch of playback inside one app:
 
-- **Opens** when a streaming app reports `playing`. Apps in `exclude_apps` (YouTube, Twitch) are never recorded.
+- **Per device**: the LG and the Android TV box each have their own open session (`source = tv | androidtv`).
+- **Opens** when a streaming app reports `playing`. Apps in `exclude_apps` (Twitch; on Android TV also Spotify and Plex) are never recorded; YouTube is recorded but kept only if it runs 20+ min or is identified (see below).
 - **Counts** only time spent `playing`; gaps longer than 30 s (suspend, network loss) are not counted.
 - **Closes** when the app leaves the foreground for more than `close_grace` (60 s), or stays paused / in menus for more than `pause_timeout` (30 min).
 - **Splits** when the `mediaId` changes *after* the player was left (back to the app's menu, then something else is played). Autoplay into the next episode without a menu gap keeps the same session — use **Next episode** in the dashboard for that.

@@ -1,15 +1,21 @@
-# TV Discord Presence + TV History
+# TV Discord Presence + TV History (Couchlog)
 
-A small self-hosted stack for people who watch on an **LG webOS TV** and track what they watch on **Trakt** and **Simkl**:
+A small self-hosted stack for people who watch on an **LG webOS TV**, an **Android TV / Google TV box** and **Plex**, and track what they watch on **Trakt** and **Simkl**:
 
 | Piece | What it does |
 |---|---|
-| `tvpresence.py` | Reads the foreground app and play/pause state from the TV, shows it as Discord Rich Presence (`Watching HBO Max`), and records every viewing session into a local SQLite history. |
+| `tvpresence.py` | Reads the foreground app and play/pause state from the **LG TV** (webOS, SSAP) and from an **Android TV box** (ADB: also position, resolution/codec and, when the app publishes it, the title), shows it as Discord Rich Presence (`Watching HBO Max`), and records every viewing session into a local SQLite history. |
 | `tvhistory_dashboard.py` + `.html` | **Couchlog**, the local web dashboard (port 7790, installable as a PWA) to identify those sessions (search TMDB + IMDb at once, or paste an ID/link), push them to Trakt and Simkl **by external ID** (automatically when an identified session ends and at least 80 % of its runtime was played), verify they landed, import Plex plays, and show a live *Now on Plex* card. Once a session is identified, the Discord presence shows the real title and poster. |
 | `tvhistory_db.py` | Shared SQLite schema (`~/.local/share/tvpresence/history.db`). The database is the source of truth between the two processes. |
 | `tvsync_reconcile.py` | One-off CLI that reconciles the **full** Trakt ↔ Simkl history, with Plex as a witness. Dry-run by default. |
 
-Why: webOS never exposes *what* is playing inside Netflix/HBO Max/Disney+, and scrobblers miss things or match the wrong title. This keeps your own record so nothing is lost, and lets you send it later once the title exists on Trakt/Simkl.
+Why: streaming apps on TVs rarely say *what* is playing (webOS never does; on Android TV some apps publish a title, Netflix and izzi don't), HBO Max has no watch history at all, and scrobblers miss things or match the wrong title. This keeps your own record so nothing is lost, and sends it to Trakt/Simkl by ID, now or later once the title exists there.
+
+| Source | How | What it knows |
+|---|---|---|
+| LG webOS TV | SSAP over the LAN | app, playing/paused |
+| Android TV / Google TV box | ADB over the LAN | app, playing/paused, real position, resolution + codec, title when the app publishes it (YouTube, HBO Max, Spotify; not Netflix or izzi) |
+| Plex | library DB / HTTP + `/status/sessions` | exact title and IDs, live position (*Now on Plex*) |
 
 ```
 Watching HBO Max                  Watching HBO Max
@@ -21,7 +27,7 @@ Playing on TV · 00:12:34    →     The Hotline
 ## Requirements
 
 - Python ≥ 3.11 on Linux, macOS or Windows (see [Platforms](#platforms)). The dashboard is stdlib only; the presence daemon uses a venv.
-- LG webOS TV on the same network (see [TV connection](#tv-connection)).
+- An LG webOS TV and/or an Android TV box on the same network (see [TV connection](#tv-connection) and [Android TV](#android-tv)).
 - Discord desktop running on the same machine, with Settings → Activity Privacy → *Share your detected activities with others* turned on. You also need a Discord **Application ID** (`client_id`); see [Discord application](#discord-application).
 - A TMDB API key.
 - For pushing: [trakt-scrobbler](https://github.com/iamkroot/trakt-scrobbler) installed with pipx and authenticated (the dashboard reuses its client id and token), and a Simkl app + token.
@@ -135,6 +141,16 @@ Trade-off: it is someone else's app. If its owner deletes it or changes its ID, 
 4. Put it in `~/.config/tvpresence/config.toml` as `client_id = "…"` (or export `TVPRESENCE_CLIENT_ID`), then `systemctl --user restart tvpresence`.
 
 The Application ID is not a secret: it is visible to anyone who sees your activity.
+
+## Plex and trakt-scrobbler (no duplicates)
+
+Plex plays reach Trakt two ways: [trakt-scrobbler](https://github.com/iamkroot/trakt-scrobbler) (`trakts`) scrobbles them live, and the dashboard imports them from Plex and auto-sends them. That does **not** create duplicates, and `trakts` should stay on:
+
+- **Dedupe.** Before sending a Plex-sourced item to Trakt, the dashboard looks for it in your Trakt history within ±12 h of the play, **by external ID**. If trakt-scrobbler already recorded it, nothing is sent and the item is marked *"Already on Trakt (sent by trakt-scrobbler)"*. Only what `trakts` missed (failed, under 80 %, or matched to another title) is sent.
+- **The token belongs to trakt-scrobbler.** The dashboard reuses its client id and token and never refreshes it (refresh tokens are single-use; two refreshers would break each other). Stop `trakts` and nobody renews the token: once it expires, the dashboard cannot write to Trakt either.
+- **Live scrobble.** `trakts` makes Trakt show what you are watching right now (the `● scrobbling to Trakt` chip on the *Now on Plex* card). The dashboard only sends when a session ends.
+- **Wrong matches.** `trakts` matches by title and sometimes picks the wrong work. The dashboard still sends the right one by ID, but the wrong play stays in Trakt until you delete it. Fix the cause in trakt-scrobbler's remap file (or its cache, see [docs/gotchas.md](docs/gotchas.md)) instead of turning it off.
+- **Simkl** gets Plex plays from its own Plex webhook, which silently drops titles whose Plex metadata lacks TVDB/IMDb IDs (new releases). The dashboard's auto-send fills those gaps.
 
 ## Credentials
 
