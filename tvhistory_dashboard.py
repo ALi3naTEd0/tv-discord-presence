@@ -871,6 +871,30 @@ def plex_import() -> int:
         PLEX_IMPORT_LOCK.release()
 
 
+PLEX_CODECS = {"hevc": "HEVC", "h264": "H.264", "av1": "AV1", "vp9": "VP9", "mpeg2video": "MPEG-2", "vc1": "VC-1"}
+
+
+def plex_video(m: dict) -> dict:
+    """Format of the file Plex is serving: resolution/codec (same keys as the Android TV capture), HDR, audio, direct play vs transcode."""
+    media = next((x for x in m.get("Media") or [] if x.get("selected")), None) or (m.get("Media") or [{}])[0]
+    part = (media.get("Part") or [{}])[0]
+    streams = part.get("Stream") or []
+    v = next((x for x in streams if x.get("streamType") == 1), {})
+    a = next((x for x in streams if x.get("streamType") == 2 and x.get("selected")), None) or next((x for x in streams if x.get("streamType") == 2), {})
+    title = v.get("displayTitle") or ""
+    hdr = next((t for t in ("Dolby Vision", "HDR10+", "HDR10", "HLG") if t in title), None)
+    if not hdr:
+        hdr = "Dolby Vision" if v.get("DOVIPresent") else {"smpte2084": "HDR10", "arib-std-b67": "HLG"}.get(v.get("colorTrc"))
+    ts = m.get("TranscodeSession") or {}
+    decision = ("transcode" if ts.get("videoDecision") == "transcode" else
+                "direct play" if part.get("decision") == "directplay" or not ts else "direct stream")
+    codec = media.get("videoCodec") or v.get("codec") or ""
+    return {"video_width": media.get("width") or v.get("width"), "video_height": media.get("height") or v.get("height"),
+            "video_codec": PLEX_CODECS.get(codec, codec.upper()), "video_hdr": hdr, "video_decision": decision,
+            "video_bitrate": media.get("bitrate"),
+            "audio": re.sub(r"^.*\((.*)\)$", r"\1", a.get("displayTitle") or "") or None}
+
+
 def plex_now() -> list:
     """What is playing on Plex right now (any device), with real position."""
     def fetch():
@@ -897,7 +921,7 @@ def plex_now() -> list:
                 except Exception:
                     pass
             pl = m.get("Player") or {}
-            out.append({
+            out.append({**plex_video(m),
                 "kind": "episode" if ep else "movie",
                 "title": m.get("grandparentTitle") if ep else m.get("title"),
                 "year": None if ep else m.get("year"),

@@ -40,7 +40,7 @@ Logo `static/icon.svg`, favicon, `manifest.webmanifest`, pass-through `sw.js` se
 
 - **Header:** stats incl. `auto-send on (≥80% watched)` · *Check Trakt/Simkl* (read-only) · *Import from Plex* · *Send pending (N)* (writes).
 - **Device tabs:** All · LG TV · Android TV · Plex (remembered per browser). Each device has its own *Now on…* card.
-- **Now on Plex:** poster, state, device, position bar, `Trakt ✓/Simkl ✓` match chips, `● scrobbling to Trakt` when trakt-scrobbler is live.
+- **Now on Plex:** poster, state, device, position bar, `Trakt ✓/Simkl ✓` match chips, `● scrobbling to Trakt` when trakt-scrobbler is live, and the file format from the Plex session (`4K · HEVC` `HDR10+` `EAC3 5.1` `direct play`/`transcode`, bitrate on hover). The box capture skips the Plex app, so this comes from the server, not ADB.
 - **Now on LG TV / Android TV:** app, state, time (Android TV: real position, progress bar against the TMDB runtime, `4K · AV1` format chip). Unidentified → search pre-filled from the device's title (HBO-style apps: the **show** from the second line; YouTube: the title, with the second line as *Search instead* chips). Identified → what Discord shows, *Next episode*, *Change*.
 - **Filters:** All · Unidentified · Pending · Sent · Ignored · **Short** (YouTube under 20 min, kept 7 days in case one was a short film).
 - **Status chips:** `unchecked`, `to send`, `✓`, `✓ already there`, `not listed yet`, `held · N% watched` / `held · runtime unknown` (auto-send waiting; *Send* forces it), `error`.
@@ -91,6 +91,7 @@ Mi Box over ADB (read-only checks): use the venv's `adb_shell` with `~/.config/t
 | Trakt 403 `error code: 1010` | missing custom User-Agent |
 | Trakt 401 | token expired → user runs `trakts auth` |
 | Simkl 201 but nothing added | read `not_found`; `plantowatch` = Simkl thinks it's unreleased (fix the date on TMDB) |
+| Plex playing but nothing in Discord | `journalctl --user -u drpp`: `Failed to upload image … 500` = DRPP's image host (Litterbox) is down and DRPP keeps retrying the poster; switch `images.uploaders` in `~/.config/drpp/config.yml` (ImgBB needs the user's free key) |
 | Wrong match by trakt-scrobbler | its remap file / cache `~/.local/share/trakt-scrobbler/trakt_cache.json`; back up, fix only the wrong keys, with the user's OK |
 | No sound on the box after a settings change | CEC toggled without reboot → reboot the box |
 

@@ -54,6 +54,7 @@ button:disabled{opacity:.5;cursor:default}
 .bar span{display:block;height:100%;background:var(--acc);border-radius:99px}
 .nowBar.est .bar span{opacity:.5}
 .chip.vfmt{color:var(--tx);border-color:#33415f;margin-left:6px}
+.chips .chip.vfmt{margin-left:0}
 .chip.src{color:var(--tx)}
 .altrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
 .altbtn{font-size:13px;padding:4px 10px;border:1px solid var(--acc);border-radius:9px;color:var(--acc);cursor:pointer;background:var(--card)}
@@ -182,6 +183,12 @@ const videoTag = s => {
   const w = s.video_width, h = s.video_height, res = w >= 3000 ? "4K" : w >= 1800 ? "1080p" : w >= 1200 ? "720p" : `${h}p`;
   return `<span class="chip vfmt" title="${s.video_width}×${h} · ${esc(s.video_codec || "")}">${res}${s.video_codec ? " · " + esc(s.video_codec) : ""}</span>`;
 };
+// Plex knows the file: HDR flavour, audio, direct play vs transcode
+const plexFormat = p => {
+  if (!p.video_width) return "";
+  const rate = p.video_bitrate ? ` · ${(p.video_bitrate / 1000).toFixed(p.video_bitrate < 10000 ? 1 : 0)} Mbps` : "";
+  return `<div class="chips">${videoTag(p)}${p.video_hdr ? `<span class="chip vfmt" title="the LG shows HDR10/HLG; HDR10+ plays as HDR10, Dolby Vision as its base layer">${esc(p.video_hdr)}</span>` : ""}${p.audio ? `<span class="chip vfmt">${esc(p.audio)}</span>` : ""}<span class="chip${p.video_decision === "transcode" ? " warn" : ""}" title="${p.video_decision === "transcode" ? "the server is re-encoding" : "the original file, untouched"}${rate}">${esc(p.video_decision)}</span></div>`;
+};
 const dayLabel = ts => {
   const d = new Date(ts * 1000), t = new Date(); t.setHours(0,0,0,0);
   const x = new Date(d); x.setHours(0,0,0,0);
@@ -246,6 +253,7 @@ function renderPlexNow() {
         <div class="title" style="margin-top:8px">${esc(p.title)}</div>
         <div class="meta">${epLine(p)}</div>
         ${matchChips(p.match, liveChip(p, paused))}
+        ${plexFormat(p)}
         ${p.duration ? `<div class="bar"><span style="width:${pct.toFixed(1)}%"></span></div>
           <div class="meta" style="margin-top:4px">${clock(p.offset)} / ${clock(p.duration)} · ${Math.round((p.duration - p.offset) / 60)} min left</div>` : ""}
       </div></div></div>`;
