@@ -108,7 +108,10 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
                       ("auto_hidden", "INTEGER NOT NULL DEFAULT 0"),
                       ("hint_extra", "TEXT"),
                       ("position", "REAL"),
-                      ("live_position", "REAL")):  # last sample, for the Now card (position keeps the furthest)     # last real playback position in seconds (Android TV)   # the device's second line (channel / tagline): YouTube hides real titles there  # short clip kept 7 days under "Short"
+                      ("live_position", "REAL"),
+                      ("video_codec", "TEXT"),    # Android TV decoder: AV1 / HEVC / H.264 / VP9 / Dolby Vision
+                      ("video_width", "INTEGER"),
+                      ("video_height", "INTEGER")):  # last sample, for the Now card (position keeps the furthest)     # last real playback position in seconds (Android TV)   # the device's second line (channel / tagline): YouTube hides real titles there  # short clip kept 7 days under "Short"
         if col not in cols:
             try:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {decl}")
@@ -167,6 +170,12 @@ def reopen_recent(conn, source: str, app_id: str, media_id: str, within: float, 
     conn.execute("UPDATE sessions SET state='open', ended_at=NULL, auto_hidden=0, last_seen_at=? WHERE id=?",
                  (now, row["id"]))
     return conn.execute("SELECT * FROM sessions WHERE id=?", (row["id"],)).fetchone()
+
+
+def set_video(conn, sid: int, codec: str, width: int, height: int) -> None:
+    """Video format the box decoded for this session (keep the widest = highest resolution seen)."""
+    conn.execute("UPDATE sessions SET video_codec=?, video_width=?, video_height=? WHERE id=?"
+                 " AND COALESCE(video_width, 0) <= ?", (codec, width, height, sid, width))
 
 
 def set_position(conn, sid: int, pos: float) -> None:

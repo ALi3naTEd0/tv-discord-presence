@@ -139,6 +139,36 @@ class AndroidTv:
         log.info("Connected to Android TV %s", self.host)
         return True
 
+    MIME = {"video/av01": "AV1", "video/hevc": "HEVC", "video/avc": "H.264",
+            "video/x-vnd.on2.vp9": "VP9", "video/dolby-vision": "Dolby Vision", "video/mpeg2": "MPEG-2"}
+
+    def video_formats(self) -> list:
+        """New video decoder records since the last call: [(package, codec, width, height)].
+        Android logs them in media.metrics when an app releases the decoder (end, pause, seek)."""
+        if self.dev is None:
+            return []
+        try:
+            out = self.dev.shell("dumpsys media.metrics | grep 'mediacodec.height' | grep 'mime=video' | tail -15",
+                                 timeout_s=20)
+        except Exception:
+            return []
+        seen, first = getattr(self, "_seen_codecs", None), not hasattr(self, "_seen_codecs")
+        seen = seen if seen is not None else set()
+        new = []
+        for line in out.splitlines():
+            key = line.split(":", 1)[0].strip()   # record number
+            if key in seen:
+                continue
+            seen.add(key)
+            f = dict(re.findall(r"android\.media\.mediacodec\.([\w-]+)=([^,)]+)", line))
+            app = re.search(r"\((\S+), \d+, \d+\)", line)
+            if first or f.get("encoder") == "1" or not app or not f.get("height"):
+                continue
+            new.append((app.group(1), self.MIME.get(f.get("mime", ""), f.get("mime", "").split("/")[-1].upper()),
+                        int(f.get("width", 0)), int(f["height"])))
+        self._seen_codecs = seen
+        return new
+
     def read(self):
         """-> (info, media_id, hint, position_seconds) like the LG reader, or all None."""
         if not self._connect():
@@ -515,6 +545,19 @@ class TvPresence:
                     except Exception as e:
                         log.debug("Android TV: %s", e)
                     if self.atv_history:
+                        self._atv_n = getattr(self, "_atv_n", 0) + 1
+                        if self._atv_n % 6 == 1:   # about every 30 s: decoder formats (resolution, codec)
+                            try:
+                                fmts = await asyncio.wait_for(asyncio.to_thread(self.atv.video_formats), 25)
+                                for pkg, codec, w, h in fmts:
+                                    row = self.atv_history.conn.execute(
+                                        "SELECT id FROM sessions WHERE source='androidtv' AND app_id=? AND"
+                                        " (state='open' OR ended_at > ?) ORDER BY id DESC LIMIT 1",
+                                        (pkg, time.time() - 600)).fetchone()
+                                    if row:
+                                        db.set_video(self.atv_history.conn, row["id"], codec, w, h)
+                            except Exception as e:
+                                log.debug("Android TV formats: %s", e)
                         try:
                             s2 = self.atv_history.tick(atv_info, atv_media, atv_hint, atv_pos)
                             atv_ident = self.atv_history.identification(s2)

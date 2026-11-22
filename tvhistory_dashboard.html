@@ -53,6 +53,7 @@ button:disabled{opacity:.5;cursor:default}
 .bar{height:6px;background:#0c0e12;border-radius:99px;overflow:hidden;margin-top:12px}
 .bar span{display:block;height:100%;background:var(--acc);border-radius:99px}
 .nowBar.est .bar span{opacity:.5}
+.chip.vfmt{color:var(--tx);border-color:#33415f;margin-left:6px}
 .chip.src{color:var(--tx)}
 .altrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
 .altbtn{font-size:13px;padding:4px 10px;border:1px solid var(--acc);border-radius:9px;color:var(--acc);cursor:pointer;background:var(--card)}
@@ -174,6 +175,13 @@ function nowBar(s) {
   return `<div class="nowBar${it.runtime_est ? " est" : ""}"><div class="bar"><span style="width:${pct.toFixed(1)}%"></span></div>
     <div class="meta" style="margin-top:4px">${clock(live)} / ${it.runtime_est ? "~" : ""}${clock(total)} · ${it.runtime_est ? "~" : ""}${left} min left</div></div>`;
 }
+// "4K · AV1" from what the Android TV box decoded
+const videoTag = s => {
+  if (!s.video_width) return "";
+  // by width: scope films are 3840×1606 (still 4K) or 1920×800 (still 1080p)
+  const w = s.video_width, h = s.video_height, res = w >= 3000 ? "4K" : w >= 1800 ? "1080p" : w >= 1200 ? "720p" : `${h}p`;
+  return `<span class="chip vfmt" title="${s.video_width}×${h} · ${esc(s.video_codec || "")}">${res}${s.video_codec ? " · " + esc(s.video_codec) : ""}</span>`;
+};
 const dayLabel = ts => {
   const d = new Date(ts * 1000), t = new Date(); t.setHours(0,0,0,0);
   const x = new Date(d); x.setHours(0,0,0,0);
@@ -272,6 +280,7 @@ function renderNowCard(box, s) {
     $(".nowDot", card).className = "dot nowDot" + (paused ? " pause" : "");
     $(".nowState", card).textContent = paused ? "paused" : "playing";
     const nb = $(".nowBar", card); if (nb) nb.outerHTML = nowBar(s);
+    const vf = $(".nowVfmt", card); if (vf) vf.innerHTML = videoTag(s);
     return;
   }
   nowKeys[s.id] = key;
@@ -280,7 +289,8 @@ function renderNowCard(box, s) {
   card.innerHTML = `<div class="card now"><h2>Now on ${SRC[s.source] || "TV"}</h2>
     <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
       <span class="dot nowDot${paused ? " pause" : ""}"></span>
-      <span class="meta"><span class="nowState">${paused ? "paused" : "playing"}</span> · since ${hhmm(s.started_at)} · <span class="nowMins">${nowTime(s)}</span></span></div>
+      <span class="meta"><span class="nowState">${paused ? "paused" : "playing"}</span> · since ${hhmm(s.started_at)} · <span class="nowMins">${nowTime(s)}</span></span>
+      <span class="nowVfmt">${videoTag(s)}</span></div>
     ${nowBar(s)}
     <div class="nowBody" style="margin-top:12px"></div></div>`;
   const body = $(".nowBody", card);
@@ -333,7 +343,7 @@ function renderList() {
       ${it0?.poster ? `<img class="poster" src="${esc(it0.poster)}" alt="">` : ""}
       <div style="flex:1;min-width:0">
         <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
-          <span class="meta">${hhmm(s.started_at)}–${hhmm(s.ended_at || s.last_seen_at)} · ${mins(watchedSecs(s))}${src === "all" && s.source !== "plex" ? ` · ${SRC[s.source] || "LG TV"}` : ""}</span></div>
+          <span class="meta">${hhmm(s.started_at)}–${hhmm(s.ended_at || s.last_seen_at)} · ${mins(watchedSecs(s))}${src === "all" && s.source !== "plex" ? ` · ${SRC[s.source] || "LG TV"}` : ""}</span>${videoTag(s)}</div>
         ${s.items.length ? `<div class="title" style="margin-top:6px">${esc(it0.title)}</div>
           <ul class="items">${s.items.map(i => `<li><span class="meta">${epLine(i)}</span><div class="chips">${statusChip("trakt", i)}${statusChip("simkl", i)}</div></li>`).join("")}</ul>`
           : `${s.hint_title ? `<div class="title" style="margin-top:6px">${esc(s.hint_title)}</div>
