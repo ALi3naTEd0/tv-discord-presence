@@ -95,6 +95,7 @@ ANDROID_APPS: dict[str, tuple[str, str]] = {
     "com.google.android.youtube.tv": ("YouTube", "www.youtube.com"),
     "com.plexapp.android": ("Plex", "www.plex.tv"),
     "com.spotify.tv.android": ("Spotify", "www.spotify.com"),
+    "tv.mirada.iris.android.inspire.izzitv.byod": ("izzi tv", "www.izzi.mx"),   # live TV: no title, no position
 }
 # Never recorded (music, Twitch, Plex: the Plex importer and DRPP cover it).
 # YouTube IS recorded on Android TV (it publishes titles); short sessions are dropped, see min_seconds_by_app
