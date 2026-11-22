@@ -7,6 +7,9 @@ ignore_apps = ["cdp-30"]           # Plex app on webOS: covered by the Plex impo
 only_known = false
 show_when_browsing = false
 
+[consoles]                         # optional: game consoles on HDMI inputs (shown as "Playing …", never recorded)
+# hdmi2 = "Nintendo Switch 2"      # auto-detected anyway when the LG labels the input Nintendo/Switch/PlayStation/Xbox
+
 [androidtv]                        # optional: an Android TV / Google TV box on the LAN
 # host = "192.168.1.117"           # enable Developer options + USB debugging on the box first
 # port = 5555

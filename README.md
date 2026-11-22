@@ -110,6 +110,10 @@ An Android TV / Google TV box (tested: Xiaomi Mi Box, Android 11) is read over *
 
 **Discord:** when an app publishes its title (YouTube: video + channel), Discord shows it directly, even for apps that are not recorded in the history. The box's activity is shown when the LG itself has nothing streaming in front (e.g. the LG is on the box's HDMI input). Plex and Spotify on the box are never shown or recorded (DRPP and the Plex importer cover Plex).
 
+## Game consoles
+
+A console on an LG HDMI input (Nintendo Switch / Switch 2, PlayStation, Xbox) shows in Discord as **Playing Nintendo Switch 2 · On TV** with an elapsed timer, and is not recorded in the history. It is detected from the input's label (LG names SIMPLINK/CEC devices; you can also rename the input on the TV) or set explicitly with `[consoles] hdmi2 = "Nintendo Switch 2"`. The LG only knows *which device* is in front, **not the game**: the game title only comes from Nintendo (see [nxapi](https://github.com/samuelthomas2774/nxapi), which needs a secondary Nintendo account and uses Nintendo's API unofficially).
+
 ## Discord application
 
 Rich Presence always runs under a Discord *application*, identified by its Application ID (`client_id`). The app itself does almost nothing here: the code overrides the activity name (`Watching HBO Max`) and passes logos and posters as URLs, so the app needs **no** uploaded art and no bot. Its own name only shows up as a fallback.

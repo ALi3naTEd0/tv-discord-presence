@@ -78,6 +78,13 @@ MAX_TICK_GAP = 30  # s; after suspend or a dropout the gap is not counted as pla
 
 SYSTEM_PREFIXES = ("com.webos.", "com.lge.", "lge.", "com.lg.", "webos.")
 
+# Game consoles on an HDMI input: the LG only knows which device is in front, not the game.
+# Detected from the input's label (LG names SIMPLINK devices, or rename the input yourself)
+# or set explicitly in config:  [consoles]  hdmi2 = "Nintendo Switch 2"
+CONSOLE_HINTS = (("switch 2", "Nintendo Switch 2", "www.nintendo.com"), ("nintendo", "Nintendo Switch", "www.nintendo.com"),
+                 ("switch", "Nintendo Switch", "www.nintendo.com"), ("playstation", "PlayStation", "www.playstation.com"),
+                 ("ps5", "PlayStation 5", "www.playstation.com"), ("xbox", "Xbox", "www.xbox.com"))
+
 # ---------- Android TV (ADB over the network) ----------
 # package -> (name, domain for the logo)
 ANDROID_APPS: dict[str, tuple[str, str]] = {
@@ -375,6 +382,21 @@ class TvPresence:
         log.info("Connected to TV %s", self.cfg["tv_host"])
         return True
 
+    def console_for(self, app_id: str, st) -> tuple[str, str] | None:
+        """(name, logo domain) if the foreground HDMI input is a game console."""
+        m = re.fullmatch(r"com\.webos\.app\.(hdmi\d)", app_id or "")
+        if not m:
+            return None
+        cfg = {k.lower(): v for k, v in (self.cfg.get("consoles") or {}).items()}
+        explicit = cfg.get(m.group(1)) or cfg.get(app_id.lower())
+        label = ((getattr(st, "inputs", None) or {}).get(app_id) or {}).get("label") or ""
+        for text in (explicit, label):
+            low = (text or "").lower()
+            for hint, name, domain in CONSOLE_HINTS:
+                if hint in low:
+                    return (explicit or name), domain
+        return (explicit, "www.nintendo.com") if explicit else None
+
     def read_tv(self) -> tuple[str, str, str | None, str | None] | None:
         """Returns (app_id, name, logo) and play state, or None when there is nothing to show."""
         assert self.tv
@@ -382,6 +404,11 @@ class TvPresence:
         if not st.is_on:
             return None
         app_id = st.current_app_id or ""
+        console = self.console_for(app_id, st)
+        if console:   # an HDMI input with a game console in front: shown as "Playing …", never recorded
+            name, domain = console
+            self.media_id = None
+            return app_id, name, FAVICON.format(domain), "playing"
         if not app_id or app_id in self.cfg["ignore_apps"] or app_id.startswith(SYSTEM_PREFIXES):
             return None
         if app_id in KNOWN_APPS:
@@ -477,12 +504,13 @@ class TvPresence:
             self.current_key = key
             log.info("Presence: %s — %s — %s", name, title, sub or "")
             return
+        console = app_id.startswith("com.webos.app.hdmi")
         await self.rpc.update(
-            activity_type=ActivityType.WATCHING,
+            activity_type=ActivityType.PLAYING if console else ActivityType.WATCHING,
             status_display_type=StatusDisplayType.NAME,
             name=name,
-            details=f"Watching {name}",
-            state=f"{state} on TV",
+            details=f"Playing on {name}" if console else f"Watching {name}",
+            state="On TV" if console else f"{state} on TV",
             large_image=logo,
             large_text=name,
             start=None if paused else start,
@@ -533,7 +561,8 @@ class TvPresence:
                 if self.history:
                     try:
                         media = getattr(self, "media_id", None) if info else None
-                        sess = self.history.tick(info, media)
+                        is_console = bool(info and info[0].startswith("com.webos.app.hdmi"))
+                        sess = self.history.tick(None if is_console else info, media)
                         ident = self.history.identification(sess)
                         played = sess["played_seconds"] if sess else None
                     except Exception as e:
