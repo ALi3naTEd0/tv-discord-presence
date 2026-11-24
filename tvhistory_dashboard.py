@@ -874,6 +874,20 @@ def plex_import() -> int:
 PLEX_CODECS = {"hevc": "HEVC", "h264": "H.264", "av1": "AV1", "vp9": "VP9", "mpeg2video": "MPEG-2", "vc1": "VC-1"}
 
 
+def box_playing_format(m: dict) -> str | None:
+    """Dynamic range the Android TV box is really decoding for this Plex session (written by tvpresence
+    from the box's video driver), or None when Plex plays elsewhere or nothing was reported."""
+    try:
+        host = (tomllib.loads((db.app_dir("config") / "config.toml").read_text()).get("androidtv") or {}).get("host")
+        if not host or (m.get("Player") or {}).get("address") != host:
+            return None
+        bv = json.loads((db.DATA_DIR / "box_video.json").read_text())
+        started = time.time() - (m.get("viewOffset") or 0) / 1000 - 120
+        return bv["fmt"] if bv.get("app") == "com.plexapp.android" and bv.get("ts", 0) >= started else None
+    except Exception:
+        return None
+
+
 def plex_video(m: dict) -> dict:
     """Format of the file Plex is serving: resolution/codec (same keys as the Android TV capture), HDR, audio, direct play vs transcode."""
     media = next((x for x in m.get("Media") or [] if x.get("selected")), None) or (m.get("Media") or [{}])[0]
@@ -889,8 +903,12 @@ def plex_video(m: dict) -> dict:
     decision = ("transcode" if ts.get("videoDecision") == "transcode" else
                 "direct play" if part.get("decision") == "directplay" or not ts else "direct stream")
     codec = media.get("videoCodec") or v.get("codec") or ""
+    file_hdr = hdr or ("SDR" if media.get("width") else None)
+    live = box_playing_format(m)
     return {"video_width": media.get("width") or v.get("width"), "video_height": media.get("height") or v.get("height"),
-            "video_codec": PLEX_CODECS.get(codec, codec.upper()), "video_hdr": hdr, "video_decision": decision,
+            "video_codec": PLEX_CODECS.get(codec, codec.upper()),
+            # what really plays (the box's video driver) when Plex plays on the box; else the file's format
+            "video_hdr": live or file_hdr, "video_hdr_live": live, "video_hdr_file": file_hdr, "video_decision": decision,
             "video_bitrate": media.get("bitrate"),
             "audio": re.sub(r"^.*\((.*)\)$", r"\1", a.get("displayTitle") or "") or None}
 
@@ -1390,7 +1408,7 @@ def api_identify(sid: int, b: dict) -> dict:
     return {"ok": True, "items": len(rows)}
 
 
-def api_next(sid: int) -> dict:
+def api_next(sid: int, auto: bool = False) -> dict:
     """Split the open session: what came before stays as the current episode and
     a new session starts with the next one (apps autoplay without leaving the player)."""
     conn = db.connect()
@@ -1420,8 +1438,15 @@ def api_next(sid: int) -> dict:
     try:
         conn.execute("UPDATE sessions SET state='closed', ended_at=? WHERE id=? AND state='open'", (now, sid))
         cur = conn.execute(
-            "INSERT INTO sessions(app_id, app_name, app_logo, started_at, last_seen_at, last_play_at, source)"
-            " VALUES (?,?,?,?,?,?,?)", (sess["app_id"], sess["app_name"], sess["app_logo"], now, now, now, sess["source"]))
+            "INSERT INTO sessions(app_id, app_name, app_logo, started_at, last_seen_at, last_play_at, source, auto_next_from)"
+            " VALUES (?,?,?,?,?,?,?,?)", (sess["app_id"], sess["app_name"], sess["app_logo"], now, now, now, sess["source"],
+                                          sid if auto else None))
+        # same player, same stream: the next episode starts with the format already reported (the box only
+        # reports it when a decoder starts or stops)
+        conn.execute("UPDATE sessions SET video_codec=?, video_width=?, video_height=?, video_hdr=?, video_hdr_live=?,"
+                     " video_hdr_since=? WHERE id=?", (sess["video_codec"], sess["video_width"], sess["video_height"],
+                                                       sess["video_hdr_live"], sess["video_hdr_live"],
+                                                       now if sess["video_hdr_live"] else None, cur.lastrowid))
         conn.execute(
             "INSERT INTO items(session_id, kind, title, year, season, episode, episode_title, tmdb, tvdb, imdb, poster)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
@@ -1433,6 +1458,30 @@ def api_next(sid: int) -> dict:
         raise
     fill_runtimes(cur.lastrowid)
     return {"ok": True, "season": s, "episode": e, "session": cur.lastrowid}
+
+
+def api_undo_next(sid: int) -> dict:
+    """The automatic "next episode" was wrong because it was the same episode (you went back to the start):
+    put the time back into the previous session and drop this one. For a different episode or show, use Change."""
+    conn = db.connect()
+    sess = conn.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
+    if not sess or not sess["auto_next_from"]:
+        raise ValueError("This session was not split automatically")
+    prev = conn.execute("SELECT * FROM sessions WHERE id=?", (sess["auto_next_from"],)).fetchone()
+    if not prev:
+        raise ValueError("The previous session no longer exists")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("UPDATE sessions SET state=?, ended_at=?, last_seen_at=MAX(last_seen_at, ?), last_play_at=MAX(last_play_at, ?),"
+                     " played_seconds=played_seconds+?, live_position=? WHERE id=?",
+                     (sess["state"], sess["ended_at"], sess["last_seen_at"], sess["last_play_at"],
+                      sess["played_seconds"], sess["live_position"], prev["id"]))
+        conn.execute("DELETE FROM sessions WHERE id=?", (sid,))   # its items go with it (ON DELETE CASCADE)
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    return {"ok": True, "session": prev["id"]}
 
 
 def api_state(days: int) -> dict:
@@ -1557,7 +1606,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not CFG["plex"]:
                     return self.send(400, {"error": "Plex import is disabled"})
                 return self.send(200, {"imported": plex_import()})
-            m = re.fullmatch(r"/api/sessions/(\d+)/(identify|next|ignore|delete)", path)
+            m = re.fullmatch(r"/api/sessions/(\d+)/(identify|next|undo_next|ignore|delete)", path)
             if m:
                 sid, action = int(m.group(1)), m.group(2)
                 if action == "identify":
@@ -1565,7 +1614,9 @@ class Handler(BaseHTTPRequestHandler):
                     verify_bg([sid])
                     return self.send(200, r)
                 if action == "next":
-                    return self.send(200, api_next(sid))
+                    return self.send(200, api_next(sid, bool(body.get("auto"))))
+                if action == "undo_next":
+                    return self.send(200, api_undo_next(sid))
                 conn = db.connect()
                 if action == "ignore":
                     conn.execute("UPDATE sessions SET ignored=? WHERE id=?", (1 if body.get("ignored", True) else 0, sid))

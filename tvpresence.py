@@ -177,6 +177,26 @@ class AndroidTv:
         self._seen_codecs = seen
         return new
 
+    def hdr_events(self) -> list:
+        """New 'content dynamic range' reports from the box's video driver: [(epoch, 'SDR'|'HDR10'|'HLG'|'DV')].
+        Amlogic logs `DV: [.., bitdepth, FORMAT, ..]` in the kernel log each time a video starts; this is the
+        source's format, unlike the HDMI output (the box always outputs HDR)."""
+        if self.dev is None:
+            return []
+        try:
+            out = self.dev.shell("logcat -d -b kernel -v epoch | grep 'DV: \\[' | tail -20", timeout_s=20)
+        except Exception:
+            return []
+        last = getattr(self, "_hdr_last", 0.0)   # first call: everything still in the buffer (matched by time)
+        new = []
+        for line in out.splitlines():
+            m = re.match(r"\s*(\d+\.\d+).*DV: \[[^,]*,[^,]*,\s*\d+,\s*([A-Za-z0-9+]+)", line)
+            if m and float(m.group(1)) > last:
+                last = float(m.group(1))
+                new.append((last, m.group(2).upper()))
+        self._hdr_last = last
+        return new
+
     def read(self):
         """-> (info, media_id, hint, position_seconds) like the LG reader, or all None."""
         if not self._connect():
@@ -269,6 +289,7 @@ class HistoryRecorder:
         self.pause_timeout = float(h["pause_timeout"])
         self.close_grace = float(h["close_grace"])
         self.min_by_app = {k: float(v) for k, v in (h.get("min_seconds_by_app") or {}).items()}
+        self.dashboard_port = int(h.get("dashboard_port", 7790))
         self.conn = db.connect()
         closed, resumed = db.recover(self.conn, self.min_seconds, float(h["resume_window"]), source=source,
                                      min_by_app=self.min_by_app)
@@ -286,6 +307,38 @@ class HistoryRecorder:
         log.info("History[%s]: session %d closed (%s)", self.source, sess["id"], why)
         self._prev_playing = False
         self._left_player = False
+
+    def _autoplay_next(self, sess, pos: float):
+        """Apps like Netflix autoplay the next episode without saying so. With a real position (Android TV)
+        it shows: the identified episode was past 80 % of its runtime and playback restarts near zero.
+        Then split the session onto the next episode (same as the dashboard's "Next episode"), flagged
+        as automatic so the dashboard offers Change / Undo. Returns the new open session, or None."""
+        prev = sess["live_position"]
+        if prev is None or pos >= 300 or prev - pos < 600:
+            return None
+        it = db.current_item(self.conn, sess["id"])
+        if not it or it["kind"] != "episode" or not it["runtime"] or it["runtime_est"] or prev < 0.8 * it["runtime"] * 60:
+            return None
+        # Real watching, not a skip to the end: Netflix can jump back to an earlier episode while you are away,
+        # and seeking that one to its end must not look like this episode finishing
+        if sess["played_seconds"] < 0.5 * it["runtime"] * 60:
+            log.info("History[%s]: position jumped %.0f → %.0f s but only %.0f s played: not treated as the next episode",
+                     self.source, prev, pos, sess["played_seconds"])
+            return None
+        import json
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{self.dashboard_port}/api/sessions/{sess['id']}/next", data=b'{"auto": true}',
+                headers={"Content-Type": "application/json", "Origin": f"http://127.0.0.1:{self.dashboard_port}"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                res = json.load(r)
+        except Exception as e:
+            log.warning("History[%s]: autoplay next episode failed: %s", self.source, e)
+            return None
+        log.info("History[%s]: autoplay detected (%.0f → %.0f s): S%s · E%s, session %s",
+                 self.source, prev, pos, res.get("season"), res.get("episode"), res.get("session"))
+        return db.get_open_session(self.conn, self.source)
 
     def tick(self, info, media_id: str | None = None, hint: tuple | None = None, pos: float | None = None):
         now, mono = time.time(), time.monotonic()
@@ -337,6 +390,8 @@ class HistoryRecorder:
             self._prev_playing = False  # the previous interval was not playback
         if hint and hint[0] and not sess["hint_title"]:
             db.set_hint(self.conn, sess["id"], *hint)
+        if pos is not None and playing and self.source == "androidtv":
+            sess = self._autoplay_next(sess, pos) or sess
         if pos is not None:
             db.set_position(self.conn, sess["id"], pos)
 
@@ -569,6 +624,14 @@ class TvPresence:
         )
         log.info("Presence: %s — %s — %s", name, title, line)
 
+    def _box_video(self, ts: float, fmt: str, app: str | None) -> None:
+        """Last format the box decoded, for apps that have no box session (Plex): the dashboard reads it."""
+        import json
+        try:
+            (db.DATA_DIR / "box_video.json").write_text(json.dumps({"ts": ts, "fmt": fmt, "app": app}))
+        except Exception as e:
+            log.debug("box_video: %s", e)
+
     async def run(self) -> None:
         if not self.cfg["client_id"]:
             sys.exit(f"Missing client_id in {CONFIG_FILE} (Application ID from discord.com/developers)")
@@ -607,6 +670,23 @@ class TvPresence:
                                         (pkg, time.time() - 600)).fetchone()
                                     if row:
                                         db.set_video(self.atv_history.conn, row["id"], codec, w, h)
+                                for ts, fmt in await asyncio.wait_for(asyncio.to_thread(self.atv.hdr_events), 25):
+                                    row = self.atv_history.conn.execute(
+                                        "SELECT id FROM sessions WHERE source='androidtv' AND started_at <= ? AND"
+                                        " (state='open' OR ended_at >= ?) ORDER BY id DESC LIMIT 1", (ts + 5, ts - 5)).fetchone()
+                                    if row:
+                                        db.set_hdr(self.atv_history.conn, row["id"], fmt, ts)
+                                    self._box_video(ts, fmt, atv_info[0] if atv_info else None)
+                                open_row = self.atv_history.conn.execute(
+                                    "SELECT id FROM sessions WHERE source='androidtv' AND state='open'"
+                                    " AND video_hdr_live IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
+                                if open_row:
+                                    db.tick_hdr(self.atv_history.conn, open_row["id"], time.time())
+                                # closed sessions: count the last format up to the end
+                                for r in self.atv_history.conn.execute(
+                                        "SELECT id, ended_at FROM sessions WHERE source='androidtv' AND state='closed'"
+                                        " AND video_hdr_since IS NOT NULL AND ended_at > video_hdr_since").fetchall():
+                                    db.tick_hdr(self.atv_history.conn, r["id"], r["ended_at"])
                             except Exception as e:
                                 log.debug("Android TV formats: %s", e)
                         try:

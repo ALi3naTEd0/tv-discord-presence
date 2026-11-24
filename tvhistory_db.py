@@ -9,6 +9,7 @@ tvpresence picks it up on its next tick.
 from __future__ import annotations
 
 import os
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -111,7 +112,12 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
                       ("live_position", "REAL"),
                       ("video_codec", "TEXT"),    # Android TV decoder: AV1 / HEVC / H.264 / VP9 / Dolby Vision
                       ("video_width", "INTEGER"),
-                      ("video_height", "INTEGER")):  # last sample, for the Now card (position keeps the furthest)     # last real playback position in seconds (Android TV)   # the device's second line (channel / tagline): YouTube hides real titles there  # short clip kept 7 days under "Short"
+                      ("video_height", "INTEGER"),
+                      ("video_hdr", "TEXT"),      # dynamic range that played longest (SDR / HDR10 / HLG / DV), for the history
+                      ("video_hdr_live", "TEXT"), # what is playing right now, per the box's video driver
+                      ("video_hdr_secs", "TEXT"), # JSON {format: seconds} behind video_hdr
+                      ("video_hdr_since", "REAL"),
+                      ("auto_next_from", "INTEGER")):  # session this one was split from when the app autoplayed the next episode  # last sample, for the Now card (position keeps the furthest)     # last real playback position in seconds (Android TV)   # the device's second line (channel / tagline): YouTube hides real titles there  # short clip kept 7 days under "Short"
         if col not in cols:
             try:
                 conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} {decl}")
@@ -176,6 +182,34 @@ def set_video(conn, sid: int, codec: str, width: int, height: int) -> None:
     """Video format the box decoded for this session (keep the widest = highest resolution seen)."""
     conn.execute("UPDATE sessions SET video_codec=?, video_width=?, video_height=? WHERE id=?"
                  " AND COALESCE(video_width, 0) <= ?", (codec, width, height, sid, width))
+
+
+def _hdr_accumulate(conn, sid: int, now: float, new_fmt: str | None = None) -> None:
+    row = conn.execute("SELECT video_hdr_live, video_hdr_secs, video_hdr_since FROM sessions WHERE id=?", (sid,)).fetchone()
+    if not row:
+        return
+    live, since = row[0], row[2]
+    secs = json.loads(row[1]) if row[1] else {}
+    if live and since and now > since:
+        secs[live] = secs.get(live, 0) + (now - since)
+    live = new_fmt or live
+    if live:
+        secs.setdefault(live, 0)
+    top = max(secs, key=secs.get) if secs else None
+    conn.execute("UPDATE sessions SET video_hdr=?, video_hdr_live=?, video_hdr_secs=?, video_hdr_since=? WHERE id=?",
+                 (top, live, json.dumps({k: round(v) for k, v in secs.items()}), now, sid))
+
+
+def set_hdr(conn, sid: int, fmt: str, ts: float) -> None:
+    """A new video started at `ts` with this dynamic range, as actually decoded (the box's video driver):
+    a Dolby Vision title on a non-DV setup reports what really plays. The history keeps the format that
+    played longest, so an SDR trailer before an HDR film does not win."""
+    _hdr_accumulate(conn, sid, ts, fmt)
+
+
+def tick_hdr(conn, sid: int, now: float) -> None:
+    """Count time for the format playing now (called with the periodic format poll)."""
+    _hdr_accumulate(conn, sid, now)
 
 
 def set_position(conn, sid: int, pos: float) -> None:

@@ -55,6 +55,7 @@ button:disabled{opacity:.5;cursor:default}
 .nowBar.est .bar span{opacity:.5}
 .chip.vfmt{color:var(--tx);border-color:#33415f;margin-left:6px}
 .chips .chip.vfmt{margin-left:0}
+.chip.vfmt.hdr{color:#ffd479;border-color:#6b5520}
 .chip.src{color:var(--tx)}
 .altrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
 .altbtn{font-size:13px;padding:4px 10px;border:1px solid var(--acc);border-radius:9px;color:var(--acc);cursor:pointer;background:var(--card)}
@@ -177,17 +178,23 @@ function nowBar(s) {
     <div class="meta" style="margin-top:4px">${clock(live)} / ${it.runtime_est ? "~" : ""}${clock(total)} · ${it.runtime_est ? "~" : ""}${left} min left</div></div>`;
 }
 // "4K · AV1" from what the Android TV box decoded
-const videoTag = s => {
+// live = the Now cards: what plays right now; history rows: what played longest
+const videoTag = (s, live = false) => {
   if (!s.video_width) return "";
-  // by width: scope films are 3840×1606 (still 4K) or 1920×800 (still 1080p)
-  const w = s.video_width, h = s.video_height, res = w >= 3000 ? "4K" : w >= 1800 ? "1080p" : w >= 1200 ? "720p" : `${h}p`;
-  return `<span class="chip vfmt" title="${s.video_width}×${h} · ${esc(s.video_codec || "")}">${res}${s.video_codec ? " · " + esc(s.video_codec) : ""}</span>`;
+  // by width OR height: scope films are 3840×1606 (still 4K) or 1920×800 (still 1080p),
+  // and 4:3 / anamorphic masters are 1440×1080 (still 1080p, not 720p)
+  const w = s.video_width, h = s.video_height,
+        res = (w >= 3000 || h >= 2000) ? "4K" : (w >= 1800 || h >= 1000) ? "1080p" : (w >= 1200 || h >= 700) ? "720p" : `${h}p`;
+  const f = (live && s.video_hdr_live) || s.video_hdr;
+  const file = s.video_hdr_file && s.video_hdr_file !== f ? ` · file: ${s.video_hdr_file}` : "";
+  const hdr = f ? `<span class="chip vfmt${f === "SDR" ? "" : " hdr"}" title="${s.video_hdr_live || s.source === "androidtv" ? "as actually decoded by the box" : "the file's format (Plex plays on another device)"}${file}">${esc(f)}${file ? ` <span style="opacity:.6">(file ${esc(s.video_hdr_file)})</span>` : ""}</span>` : "";
+  return `<span class="chip vfmt" title="${s.video_width}×${h} · ${esc(s.video_codec || "")}">${res}${s.video_codec ? " · " + esc(s.video_codec) : ""}</span>${hdr}`;
 };
 // Plex knows the file: HDR flavour, audio, direct play vs transcode
 const plexFormat = p => {
   if (!p.video_width) return "";
   const rate = p.video_bitrate ? ` · ${(p.video_bitrate / 1000).toFixed(p.video_bitrate < 10000 ? 1 : 0)} Mbps` : "";
-  return `<div class="chips">${videoTag(p)}${p.video_hdr ? `<span class="chip vfmt" title="the LG shows HDR10/HLG; HDR10+ plays as HDR10, Dolby Vision as its base layer">${esc(p.video_hdr)}</span>` : ""}${p.audio ? `<span class="chip vfmt">${esc(p.audio)}</span>` : ""}<span class="chip${p.video_decision === "transcode" ? " warn" : ""}" title="${p.video_decision === "transcode" ? "the server is re-encoding" : "the original file, untouched"}${rate}">${esc(p.video_decision)}</span></div>`;
+  return `<div class="chips">${videoTag(p, true)}${p.audio ? `<span class="chip vfmt">${esc(p.audio)}</span>` : ""}<span class="chip${p.video_decision === "transcode" ? " warn" : ""}" title="${p.video_decision === "transcode" ? "the server is re-encoding" : "the original file, untouched"}${rate}">${esc(p.video_decision)}</span></div>`;
 };
 const dayLabel = ts => {
   const d = new Date(ts * 1000), t = new Date(); t.setHours(0,0,0,0);
@@ -288,7 +295,7 @@ function renderNowCard(box, s) {
     $(".nowDot", card).className = "dot nowDot" + (paused ? " pause" : "");
     $(".nowState", card).textContent = paused ? "paused" : "playing";
     const nb = $(".nowBar", card); if (nb) nb.outerHTML = nowBar(s);
-    const vf = $(".nowVfmt", card); if (vf) vf.innerHTML = videoTag(s);
+    const vf = $(".nowVfmt", card); if (vf) vf.innerHTML = videoTag(s, true);
     return;
   }
   nowKeys[s.id] = key;
@@ -298,7 +305,7 @@ function renderNowCard(box, s) {
     <div class="app">${s.app_logo ? `<img src="${esc(s.app_logo)}" alt="">` : ""}${esc(s.app_name)}
       <span class="dot nowDot${paused ? " pause" : ""}"></span>
       <span class="meta"><span class="nowState">${paused ? "paused" : "playing"}</span> · since ${hhmm(s.started_at)} · <span class="nowMins">${nowTime(s)}</span></span>
-      <span class="nowVfmt">${videoTag(s)}</span></div>
+      <span class="nowVfmt">${videoTag(s, true)}</span></div>
     ${nowBar(s)}
     <div class="nowBody" style="margin-top:12px"></div></div>`;
   const body = $(".nowBody", card);
@@ -306,10 +313,18 @@ function renderNowCard(box, s) {
     body.innerHTML = `<div class="row">${it.poster ? `<img class="poster big" src="${esc(it.poster)}" alt="">` : ""}
       <div><div class="title">${esc(it.title)}</div><div class="meta">${epLine(it)}</div>
       ${matchChips(it.match)}
-      <div class="hint">This is what Discord shows. If the app autoplayed the next one, hit "Next episode".</div>
+      <div class="hint">${s.auto_next_from
+        ? `${esc(s.app_name)} played this on its own after the previous episode, so Couchlog moved on to it. Wrong episode or another show: <b>Change</b>. Still the same episode (you went back to the start): <b>Undo</b>.`
+        : `This is what Discord shows. If the app autoplayed the next one, hit "Next episode".`}</div>
       <div class="actions">
         ${it.kind === "episode" ? `<button class="pri nextEp">Next episode</button>` : ""}
-        <button class="nowChange">Change</button></div></div></div>`;
+        <button class="nowChange">Change</button>
+        ${s.auto_next_from ? `<button class="undoNext" title="Merge back into the previous episode's session">Undo</button>` : ""}</div></div></div>`;
+    $(".undoNext", body)?.addEventListener("click", async e => {
+      e.target.disabled = true;
+      try { await api(`/api/sessions/${s.id}/undo_next`, {}); toast("Back to the previous episode"); await refresh(); }
+      catch (err) { toast(err.message); e.target.disabled = false; }
+    });
     $(".nextEp", body)?.addEventListener("click", async e => {
       e.target.disabled = true;
       try { const r = await api(`/api/sessions/${s.id}/next`, {}); toast(`Now: S${r.season} · E${r.episode}`); await refresh(); }
