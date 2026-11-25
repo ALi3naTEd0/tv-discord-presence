@@ -1,0 +1,196 @@
+# Couchlog in Go: design
+
+Status: **draft, stage 2 (Design)**. The Python version keeps running until the
+Go version gives the same results on the same TVs (see *Migration*).
+
+## Goals
+
+1. **Installs in one step, anywhere.** One static binary for Linux, Windows and
+   macOS on amd64 and arm64, a multi-arch Docker image and an AUR package. No
+   Python, no venv, no trakt-scrobbler, no hand-made API keys.
+2. **Your own history first.** Couchlog records what you watch on any TV or
+   player. Trakt and Simkl are *destinations*; Discord is an optional extra.
+3. **Server anywhere, presence on the desktop.** The history can live on a
+   NAS or a Raspberry Pi that is always on, while Discord Rich Presence (which
+   only works through Discord's local IPC) runs on the PC where Discord is.
+4. **Room for a hosted mode later**, without building it now.
+
+## One binary, two modes
+
+```
+couchlog server    24/7: sources, session engine, identification, sync, dashboard
+couchlog agent     on the PC with Discord: shows what the server says is playing
+couchlog import    one-off: brings an existing tvpresence history.db in
+```
+
+Running `couchlog server --with-agent` on a single PC gives today's setup.
+
+```
+ LG webOS ──SSAP──┐
+ Android TV ─ADB──┤                         ┌── Trakt  (by ID)
+ Plex ──HTTP──────┼─▶ Sources ─▶ Engine ─▶ Store ─▶ Sinks ──┤
+ Jellyfin/Kodi/…──┘   (server     (sessions) (SQLite)     └── Simkl  (by ID)
+        ▲              or agent)        │
+        │                               ├─▶ Events bus ─▶ API (HTTP + WebSocket)
+   agent-hosted                         │                    ├─▶ Dashboard (Svelte PWA, embedded)
+   sources push                         │                    └─▶ Agent ─▶ Discord Rich Presence
+   observations                         └─▶ Identify (TMDB, IMDb, TVmaze)
+```
+
+## Packages
+
+| Package | Job |
+|---|---|
+| `cmd/couchlog` | subcommands, flags, signals, wiring |
+| `internal/model` | the shared types: `Observation`, `Session`, `Item`, `Delivery`, `Device` |
+| `internal/source` | the `Source` interface and one subpackage per device kind (`webos`, `androidtv`, `plex`, later `jellyfin`, `kodi`, `roku`) |
+| `internal/engine` | turns a stream of observations per device into sessions, with today's rules |
+| `internal/store` | SQLite schema, migrations, queries, the tvpresence importer |
+| `internal/identify` | TMDB + IMDb + TVmaze search and ID resolution |
+| `internal/sink` | the `Sink` interface; `trakt`, `simkl` |
+| `internal/auth` | device-code logins (Trakt, Simkl), token refresh, credential storage |
+| `internal/presence` | Discord Rich Presence (agent side) |
+| `internal/events` | typed event bus (the one from CatchMe: slow subscribers are dropped, not waited for) |
+| `internal/api` | HTTP + WebSocket API for the dashboard and agents; loopback by default, tokens always |
+
+## Sources
+
+A source watches one device and reports **observations**: what the device
+says right now. It knows nothing about sessions or the database.
+
+```go
+type Source interface {
+    Kind() string                                        // "webos", "androidtv", "plex", ...
+    Run(ctx context.Context, emit func(model.Observation)) error
+}
+
+type Observation struct {
+    DeviceID  string
+    At        time.Time
+    State     PlayState      // off, idle, playing, paused
+    App       App            // id + display name
+    MediaID   string         // device's own content id, if any (webOS mediaId, Android session id)
+    Hint      Hint           // title / subtitle / season / episode the device published, if any
+    Position  *time.Duration // real playback position, if the device knows it
+    Duration  *time.Duration
+    Video     *Video         // codec, size, dynamic range, when the device reports them
+    Identity  *Identity      // set only by sources that already know what it is (Plex)
+}
+```
+
+`Run` blocks until `ctx` ends and reconnects by itself (backoff, the same
+watchdog idea as CatchMe's fetcher). Sources that know exactly what played
+(Plex history) also produce finished plays for import; that is a second,
+optional interface (`Importer`).
+
+## Engine
+
+The engine keeps one open session per device and applies today's rules
+(from `docs/architecture.md`, unchanged):
+
+- opens when a recorded app reports `playing`; excluded apps never record
+- counts only time spent `playing`; gaps over 30 s are not counted
+- closes after `close_grace` (60 s) in another app, or `pause_timeout` (30 min) paused
+- splits when the media id changes after leaving the player
+- drops sessions under `min_seconds` (120 s); hides unidentified ones under an app's own minimum (YouTube 20 min) as *short*
+- resumes the open session after a restart within `resume_window` (10 min)
+- on Android TV, coming back to the same title within 6 h continues the session
+
+The engine is a pure state machine over observations plus a clock, so every
+rule gets a table test with a fake clock, no TV needed. The Python version's
+behaviour is the reference: the parallel run compares both.
+
+## Sinks
+
+```go
+type Sink interface {
+    Name() string                                              // "trakt", "simkl"
+    Check(ctx context.Context, items []model.Item) ([]Result, error)  // already in your history? exists there?
+    Push(ctx context.Context, items []model.Item) ([]Result, error)
+}
+```
+
+Statuses per item and sink are the ones in use today: `pending`, `ready`
+(exists on the service, not in your history yet), `added`, `not_found`,
+`skipped`, `error`. Auto-send keeps today's rule: identified, closed, watched
+time ≥ 80 % of the runtime (Plex always), check first so nothing is
+duplicated, `not_found` retried at most daily. Requests respect `Retry-After`
+and back off like CatchMe's downloader.
+
+## Store (SQLite)
+
+Pure-Go SQLite (`modernc.org/sqlite`, no CGO, so it cross-compiles). Times are
+Unix milliseconds. Every row belongs to a user, so a hosted mode later is a
+matter of more users, not a new schema.
+
+```
+users        id, name, created_at
+devices      id, user_id, kind, name, address, created_at
+sessions     id, user_id, device_id, source_key UNIQUE, app_id, app_name,
+             started_at, last_seen_at, last_play_at, ended_at, played_ms,
+             state (open|closed), hidden (''|ignored|short),
+             media_id, hint_title, hint_extra, hint_season, hint_episode,
+             position_ms, live_position_ms,
+             video_codec, video_width, video_height, video_hdr, video_hdr_ms (JSON),
+             auto_next_from
+items        id, session_id, kind (movie|episode), title, year, season, episode,
+             episode_title, tmdb, tvdb, imdb, poster, runtime_min, runtime_estimated
+deliveries   item_id, sink, status, error, attempts, updated_at   PRIMARY KEY (item_id, sink)
+credentials  user_id, service, data (JSON), updated_at            PRIMARY KEY (user_id, service)
+schema_version
+```
+
+`deliveries` replaces the `trakt_status` / `simkl_status` columns: adding a
+destination is new rows, not a new column.
+
+## API and the agent protocol
+
+Same security model as CatchMe: loopback by default, `Authorization: Bearer`,
+Origin and Host checks. Listening on the LAN (for a NAS) is an explicit flag
+and then requires HTTPS or a reverse proxy.
+
+- Dashboard: REST for actions (`identify`, `next`, `ignore`, `push`, …) plus
+  `/v1/ws` for live events, with a full snapshot on connect.
+- Agent: `/v1/agent` WebSocket. The server sends the *presence state* per
+  device (title, poster, position, playing/paused); the agent may also host
+  sources and send their observations up the same connection, which is what a
+  hosted mode would need: the TVs stay on the home network.
+- Agents pair with a one-time code shown in the dashboard and get their own
+  token, revocable per agent.
+
+## Accounts and keys
+
+Users never create apps or paste tokens:
+
+| Service | How Couchlog gets in |
+|---|---|
+| Trakt | Couchlog's own Trakt app, **device code** login (code on screen, approve on trakt.tv) |
+| Simkl | Couchlog's own Simkl app, **PIN** login |
+| TMDB | Couchlog's own API key, with the attribution TMDB requires in the UI |
+| Discord | Couchlog's own application id (public by design) |
+
+Tokens go in `credentials`, refreshed automatically. Desktop apps cannot keep
+a client secret truly secret; Trakt and Simkl accept that for device flows.
+
+## Migration from tvpresence
+
+`couchlog import ~/.local/share/tvpresence/history.db` (also offered by the
+setup wizard when it finds one):
+
+- one device per old `source` (`tv` → LG webOS, `androidtv`, `plex`)
+- seconds → milliseconds; `ignored` / `auto_hidden` → `hidden`
+- `trakt_status` / `simkl_status` (+ errors, `pushed_at`) → `deliveries` rows
+- read-only on the old file; running it twice imports nothing new
+  (`source_key` and a stable mapping of old ids)
+
+Parallel run: both versions record the same TVs for a week; a comparison
+command lists sessions that differ in start, end, played time or split.
+
+## Distribution
+
+GoReleaser on a tag: binaries for linux/windows/darwin × amd64/arm64, a
+multi-arch image on GHCR, AUR package, systemd/launchd/Windows service
+install via `couchlog service install`. Self-hosting templates (Unraid,
+CasaOS, Umbrel, Home Assistant add-on) come after the first release. CI
+copies CatchMe's: tests with race and leak checks on three systems, and an
+install-and-run smoke test of every package.
