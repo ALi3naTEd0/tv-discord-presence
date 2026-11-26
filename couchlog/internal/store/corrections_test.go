@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ALi3naTEd0/couchlog/internal/model"
+	"github.com/ALi3naTEd0/couchlog/internal/source"
 )
 
 var now = time.Date(2026, 11, 25, 22, 0, 0, 0, time.UTC)
@@ -260,5 +261,38 @@ func TestSameTitle(t *testing.T) {
 		if got := a.SameTitle(c.b); got != c.want {
 			t.Errorf("SameTitle(%+v) = %v, want %v", c.b, got, c.want)
 		}
+	}
+}
+
+func TestAddPlay(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	dev, _ := s.EnsureDevice(ctx, LocalUserID, "plex", "Plex", "http://127.0.0.1:32400")
+	p := source.Play{SourceKey: "/status/sessions/history/3", DeviceID: dev,
+		StartedAt: now.Add(-69 * time.Minute), EndedAt: now,
+		Identity: model.Identity{Kind: model.KindEpisode, Title: "The Curse", Season: 1, Episode: 10, TMDB: 114655}}
+	added, err := s.AddPlay(ctx, p, "plex", "Plex", sinks, now)
+	if err != nil || !added {
+		t.Fatalf("added %v err %v", added, err)
+	}
+	if again, _ := s.AddPlay(ctx, p, "plex", "Plex", sinks, now); again {
+		t.Error("the same play imported twice")
+	}
+	var sid int64
+	s.DB().QueryRow("SELECT id FROM sessions WHERE source_key = ?", p.SourceKey).Scan(&sid)
+	got, _ := s.Session(ctx, sid)
+	if got.Open || got.Played != 69*time.Minute || !got.EndedAt.Equal(now) {
+		t.Errorf("session %+v", got)
+	}
+	its := items(t, s, sid)
+	if len(its) != 1 || its[0].Episode != 10 || status(t, s, its[0].ID, "trakt") != model.Pending {
+		t.Errorf("items %+v", its)
+	}
+	// A play Plex could not identify (deleted from the library) waits for the picker.
+	p2 := source.Play{SourceKey: "plex:99:1", DeviceID: dev, StartedAt: now.Add(-time.Hour), EndedAt: now,
+		Identity: model.Identity{Kind: model.KindMovie, Title: "Deleted film", Year: 1999}}
+	s.AddPlay(ctx, p2, "plex", "Plex", sinks, now)
+	s.DB().QueryRow("SELECT id FROM sessions WHERE source_key = ?", p2.SourceKey).Scan(&sid)
+	if its := items(t, s, sid); len(its) != 0 {
+		t.Errorf("unidentified play got items %+v", its)
 	}
 }

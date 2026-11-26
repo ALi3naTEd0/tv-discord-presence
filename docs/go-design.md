@@ -96,6 +96,36 @@ watchdog idea as CatchMe's fetcher). Sources that know exactly what played
 (Plex history) also produce finished plays for import; that is a second,
 optional interface (`Importer`).
 
+### Implemented sources
+
+- **`source/webos`** (LG): SSAP over WebSocket, `wss://:3001` first (newer
+  firmware), then `ws://:3000`. Registers with the public LG Remote App
+  manifest, signed first and unsigned when the firmware rejects the signature;
+  the first time the TV shows a prompt and the key is saved (tvpresence's
+  `~/.config/tvpresence/key` works as is). Subscribes to power, foreground
+  app, launch points (app names) and media state, and reports every poll
+  (5 s). The TV publishes no titles. HDMI inputs and system apps are not
+  apps; unreachable means off, so the engine's grace closes the session.
+- **`source/androidtv`**: a small ADB client in Go (no adb binary): RSA auth
+  with the box's "Allow USB debugging?" prompt the first time (tvpresence's
+  `adbkey` works as is; a new key gets its Android-format `.pub`). One shell
+  call per poll reads wakefulness, the resumed activity, uptime and
+  `dumpsys media_session` (state, title, subtitle, position advanced to now);
+  every 6 polls, decoder records from `media.metrics` (codec, size) and the
+  content's dynamic range from the Amlogic driver's kernel log.
+- **`source/plex`**: not polled into sessions; `Plays` imports what Plex
+  recorded (history API, IDs from the library's GUIDs, legacy agents too) and
+  `store.AddPlay` stores each as a closed, identified session. `NowPlaying`
+  lists this account's current sessions with the file's format (Plex writes
+  Dolby Vision as "DoVi"). When Plex's own database is readable (Couchlog on
+  the Plex machine), plays come from its views table instead: it keeps each
+  viewing's GUID after the file is deleted (watch-then-delete is the common
+  case), resolved through Plex's metadata provider, or the IDs the library
+  stored for titles the provider does not know yet. Same source keys as the
+  HTTP history, so both and the tvpresence import dedupe.
+
+Each has a live test that runs only with the device's address and key.
+
 ## Engine
 
 The engine keeps one open session per device and applies today's rules

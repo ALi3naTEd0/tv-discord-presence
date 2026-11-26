@@ -3,6 +3,7 @@ module github.com/ALi3naTEd0/couchlog
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.14
 	golang.org/x/text v0.44.0
 	modernc.org/sqlite v1.63.0
 )
