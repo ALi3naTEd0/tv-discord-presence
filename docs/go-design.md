@@ -239,22 +239,31 @@ session that started within 5 min, and identifies it through TMDB with
 Netflix's English titles and real season/episode numbers. Prototype in the
 Python dashboard (`netflix_identify`); to port.
 
-Getting the session, universally, without an extension or a password:
+Getting the session, universally, in the same binary (no extension, no
+password, no separate app):
 
 1. **Automatic:** a readable browser on the same machine already has it
    (Firefox family: plain cookie store; Chromium on Linux/macOS; not
    Chrome/Edge on Windows, which use App-Bound Encryption).
-2. **Connect Netflix** in the companion app (Flutter: desktop, Android,
-   iOS): its own web view with netflix.com, sign in once, the app reads the
-   cookies of its own web view (HttpOnly included) and hands them to the
-   home server over the pairing. The server owns the session from then on;
-   the dashboard says "reconnect" when Netflix invalidates it. A PWA cannot
-   do this (cross-site cookies).
-3. Last resort: paste the cookie.
+2. **Connect Netflix** from any PC running `couchlog` (agent mode): it
+   opens an installed Chrome, Edge, Brave or Firefox with an empty profile
+   of its own and a debugging port, you sign in once, and Couchlog reads
+   that window's cookies (HttpOnly included) through the browser's
+   debugging protocol (CDP / WebDriver BiDi, over the WebSocket library
+   the webOS source already uses), then hands them to the home server over
+   the agent's token. The server owns the session from then on; the
+   dashboard says "reconnect" when Netflix invalidates it.
+3. **No PC:** paste the cookie in the dashboard. Later, optionally: a
+   headless browser on the server shown inside the dashboard, so even a
+   phone can sign in (a separate image: Chromium is ~300 MB).
 
-To verify: whether Netflix accepts a session signed in on mobile data and
-used from the home IP, whether it rotates the cookie on use, how long it
-lasts.
+A PWA cannot do 2 (cross-site cookies), which is why it lives in the
+binary, not the dashboard.
+
+To verify: whether Netflix accepts a session signed in on another machine
+or network and used from the home IP, whether it rotates the cookie on
+use, how long it lasts, and that recent Chrome allows its debugging port
+with a separate profile (it refuses it on the default one since 2025).
 
 ## Store (SQLite)
 
