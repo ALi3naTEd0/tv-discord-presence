@@ -98,3 +98,34 @@ func TestServerRecordsAndIdentifies(t *testing.T) {
 		t.Errorf("device %q", dev)
 	}
 }
+
+func TestFillPosters(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	dev, _ := st.EnsureDevice(ctx, store.LocalUserID, "plex", "Plex", "")
+	st.AddPlay(ctx, source.Play{SourceKey: "k1", DeviceID: dev, StartedAt: time.Now().Add(-time.Hour), EndedAt: time.Now(),
+		Identity: model.Identity{Kind: model.KindEpisode, Title: "Ozark", Season: 1, Episode: 2, TMDB: 69740}}, "plex", "Plex", nil, time.Now())
+	s := &Server{Store: st, Ident: &identify.Identifier{Catalog: posterCatalog{}}}
+	tried := map[int64]time.Time{}
+	if n, err := s.FillPosters(ctx, tried); err != nil || n != 1 {
+		t.Fatalf("filled %d, err %v", n, err)
+	}
+	var poster string
+	st.DB().QueryRow("SELECT poster FROM items").Scan(&poster)
+	if poster != "https://image.tmdb.org/t/p/w342/ozark.jpg" {
+		t.Errorf("poster %q", poster)
+	}
+	if n, _ := s.FillPosters(ctx, tried); n != 0 {
+		t.Error("filled again")
+	}
+}
+
+type posterCatalog struct{ catalog }
+
+func (posterCatalog) Get(_ context.Context, k identify.Kind, id int) (identify.Title, error) {
+	return identify.Title{Kind: k, TMDB: id, Title: "Ozark", Poster: "https://image.tmdb.org/t/p/w342/ozark.jpg"}, nil
+}

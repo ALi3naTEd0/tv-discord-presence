@@ -21,6 +21,7 @@ import threading
 import time
 import tomllib
 import urllib.error
+import unicodedata
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -255,6 +256,71 @@ def search_imdb(q: str) -> list[dict]:
             "overview": r.get("s") or "", "ids": {"imdb": r["id"]}, "src": {"imdb"},
         })
     return out[:8]
+
+
+def _norm_title(s: str | None) -> str:
+    s = unicodedata.normalize("NFD", (s or "").lower())
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return " ".join(re.sub(r"[^\w]+", " ", s).split())
+
+
+def imdb_poster(kind: str, title: str | None, year: int | None, imdb: str | None) -> str | None:
+    """Poster from IMDb for what TMDB has no poster for yet (brand-new films and series, or titles
+    TMDB does not list at all). By IMDb id when known; otherwise only a single exact match by
+    title, year and kind. It only ever gives a poster, never an ID."""
+    q = imdb or title
+    if not q:
+        return None
+
+    def fetch():
+        st, j = http_json("GET", f"https://v3.sg.media-imdb.com/suggestion/x/{urllib.parse.quote(q.lower())}.json")
+        return j if st == 200 and isinstance(j, dict) else {}
+    try:
+        j = cached(("imdbsug", q.lower()), 6 * 3600, fetch)
+    except Exception:
+        return None
+    want_kind = "tv" if kind in ("episode", "tv") else "movie"
+    hits = []
+    for r in j.get("d", []):
+        img = (r.get("i") or {}).get("imageUrl")
+        if not img:
+            continue
+        if imdb:
+            if r.get("id") == imdb:
+                return imdb_img(img)
+        elif (IMDB_KIND.get(r.get("qid")) == want_kind and _norm_title(r.get("l")) == _norm_title(title)
+              and (not year or r.get("y") == year)):
+            hits.append(img)
+    return imdb_img(hits[0]) if len(hits) == 1 else None
+
+
+POSTER_TRIED: dict = {}   # item id -> last attempt, so titles without any poster are retried every 6 h
+
+
+def fill_posters() -> int:
+    """Items of the last 30 days without a poster: TMDB again (posters arrive days after a
+    listing), then IMDb. Used by the dashboard and, through the DB, by the Discord presence."""
+    conn = db.connect()
+    rows = conn.execute(
+        "SELECT i.id, i.kind, i.title, i.year, i.tmdb, i.imdb FROM items i JOIN sessions s ON s.id = i.session_id"
+        " WHERE COALESCE(i.poster, '') = '' AND s.started_at > ?", (time.time() - 30 * 86400,)).fetchall()
+    fixed = 0
+    for it in rows:
+        if time.time() - POSTER_TRIED.get(it["id"], 0) < 6 * 3600:
+            continue
+        POSTER_TRIED[it["id"]] = time.time()
+        poster = None
+        if it["tmdb"]:
+            try:
+                d = tmdb(f"/{'tv' if it['kind'] == 'episode' else 'movie'}/{it['tmdb']}")
+                poster = IMG + d["poster_path"] if d.get("poster_path") else None
+            except Exception:
+                pass
+        poster = poster or imdb_poster(it["kind"], it["title"], it["year"], it["imdb"])
+        if poster:
+            conn.execute("UPDATE items SET poster = ? WHERE id = ? AND COALESCE(poster, '') = ''", (poster, it["id"]))
+            fixed += 1
+    return fixed
 
 
 def bridge(rec: dict) -> None:
@@ -938,6 +1004,9 @@ def plex_now() -> list:
                         poster = IMG + d["poster_path"] if d.get("poster_path") else None
                 except Exception:
                     pass
+            if not poster:   # not on TMDB (yet), or no poster there: IMDb's
+                poster = imdb_poster("episode" if ep else "movie", m.get("grandparentTitle") if ep else m.get("title"),
+                                     None if ep else m.get("year"), ids.get("imdb"))
             pl = m.get("Player") or {}
             out.append({**plex_video(m),
                 "kind": "episode" if ep else "movie",
@@ -1177,6 +1246,12 @@ def auto_push() -> None:
 
 def auto_loop() -> None:
     while True:
+        try:
+            n = fill_posters()
+            if n:
+                print(f"Posters: {n} filled", flush=True)
+        except Exception as e:
+            print(f"Posters: {e}", flush=True)
         time.sleep(120)
         try:
             auto_push()

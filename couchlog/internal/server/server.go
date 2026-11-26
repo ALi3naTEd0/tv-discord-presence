@@ -42,7 +42,8 @@ type Server struct {
 func New(cfg *config.Config, st *store.Store, log *slog.Logger) *Server {
 	s := &Server{Config: cfg, Store: st, Log: log}
 	if key := cfg.Secret("COUCHLOG_TMDB_KEY", "TMDB_API_KEY"); key != "" {
-		s.Ident = &identify.Identifier{Catalog: &identify.TMDB{Key: key, Language: cfg.Language}, Aliases: st}
+		s.Ident = &identify.Identifier{Catalog: &identify.TMDB{Key: key, Language: cfg.Language}, Aliases: st,
+			Posters: &identify.IMDb{}}
 	} else {
 		log.Warn("no TMDB key (COUCHLOG_TMDB_KEY): sessions are recorded but not identified")
 	}
@@ -84,6 +85,13 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			s.follow(ctx, d.Name, src, tr)
+		}()
+	}
+	if s.Ident != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.posterLoop(ctx)
 		}()
 	}
 	if p := s.Config.Plex; p != nil {
@@ -217,4 +225,45 @@ func (s *Server) ImportPlex(ctx context.Context, c *plex.Client, days int) (int,
 		}
 	}
 	return added, nil
+}
+
+// posterLoop fills missing posters every two minutes; a title without any
+// is retried every six hours.
+func (s *Server) posterLoop(ctx context.Context) {
+	tried := map[int64]time.Time{}
+	for {
+		if n, err := s.FillPosters(ctx, tried); err != nil {
+			s.Log.Warn("posters", "err", err)
+		} else if n > 0 {
+			s.Log.Info("posters filled", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Minute):
+		}
+	}
+}
+
+// FillPosters gives a poster to recent items without one: TMDB again, then
+// IMDb (see identify.Identifier.Poster). tried remembers attempts.
+func (s *Server) FillPosters(ctx context.Context, tried map[int64]time.Time) (int, error) {
+	items, err := s.Store.ItemsWithoutPoster(ctx, time.Now().AddDate(0, 0, -30))
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, it := range items {
+		if time.Since(tried[it.ID]) < 6*time.Hour {
+			continue
+		}
+		tried[it.ID] = time.Now()
+		if p := s.Ident.Poster(ctx, it); p != "" {
+			if err := s.Store.SetPoster(ctx, it.ID, p); err != nil {
+				return n, err
+			}
+			n++
+		}
+	}
+	return n, nil
 }

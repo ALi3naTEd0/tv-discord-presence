@@ -279,3 +279,32 @@ func (s *Store) FindAlias(ctx context.Context, userID int64, appID, title string
 func (s *Store) DeleteAlias(ctx context.Context, userID, id int64) error {
 	return s.exec(ctx, "DELETE FROM aliases WHERE user_id = ? AND id = ?", userID, id)
 }
+
+// ItemsWithoutPoster lists current items of sessions started after since
+// that have no poster yet (TMDB adds posters days after a new listing).
+func (s *Store) ItemsWithoutPoster(ctx context.Context, since time.Time) ([]model.Item, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT i.id, i.session_id, i.kind, i.title, COALESCE(i.year, 0),
+		COALESCE(i.season, 0), COALESCE(i.episode, 0), COALESCE(i.tmdb, 0), i.imdb
+		FROM items i JOIN sessions s ON s.id = i.session_id
+		WHERE i.poster = '' AND i.replaced_at IS NULL AND s.started_at > ? ORDER BY i.id`, ms(since))
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer rows.Close()
+	var out []model.Item
+	for rows.Next() {
+		var it model.Item
+		var kind string
+		if err := rows.Scan(&it.ID, &it.SessionID, &kind, &it.Title, &it.Year, &it.Season, &it.Episode, &it.TMDB, &it.IMDb); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+		it.Kind = model.ItemKind(kind)
+		out = append(out, it)
+	}
+	return out, rows.Err()
+}
+
+// SetPoster sets an item's poster if it still has none.
+func (s *Store) SetPoster(ctx context.Context, itemID int64, poster string) error {
+	return s.exec(ctx, "UPDATE items SET poster = ? WHERE id = ? AND poster = ''", poster, itemID)
+}

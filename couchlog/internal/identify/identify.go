@@ -46,6 +46,8 @@ type Identifier struct {
 	Catalog     Catalog
 	Aliases     Aliases         // nil = no aliases
 	NoGuessApps map[string]bool // nil = DefaultNoGuessApps
+	// Posters fills posters TMDB lacks (new titles); nil = TMDB only.
+	Posters *IMDb
 }
 
 // ErrNeedsEpisode means a show was picked without saying which episode.
@@ -132,6 +134,13 @@ func (id *Identifier) Item(ctx context.Context, k Kind, tmdbID, season, episode 
 			TMDB: t.TMDB, TVDB: t.TVDB, IMDb: t.IMDb},
 		Poster:         t.Poster,
 		RuntimeMinutes: t.Runtime,
+	}
+	if it.Poster == "" && id.Posters != nil {
+		kind := model.KindMovie
+		if k == Show {
+			kind = model.KindEpisode
+		}
+		it.Poster = id.Posters.Poster(ctx, kind, t.Title, t.Year, t.IMDb)
 	}
 	if k == Movie {
 		return it, nil
