@@ -104,3 +104,33 @@ func Resolve(ctx context.Context, c *Client, id *identify.Identifier, v Viewed) 
 	}
 	return &it, nil
 }
+
+// Continuations pairs sessions Match left alone with the newest activity
+// entry when that entry is from before them (within 6 h) and they are 10+
+// minutes old: Netflix keeps one entry per title, so picking a title up
+// again or restarting it adds no new entry, while a new title would have
+// its own by then.
+func Continuations(sessions []*model.Session, viewed []Viewed, matched []Pair, now time.Time) []Pair {
+	if len(viewed) == 0 {
+		return nil
+	}
+	newest := viewed[0]
+	for _, v := range viewed {
+		if v.DateMS > newest.DateMS {
+			newest = v
+		}
+	}
+	used := map[int64]bool{}
+	for _, p := range matched {
+		used[p.Session.ID] = true
+	}
+	var out []Pair
+	for _, s := range sessions {
+		since := s.StartedAt.Sub(newest.Started())
+		if used[s.ID] || since <= Window || since > 6*time.Hour || now.Sub(s.StartedAt) < 10*time.Minute {
+			continue
+		}
+		out = append(out, Pair{Session: s, Viewed: newest})
+	}
+	return out
+}

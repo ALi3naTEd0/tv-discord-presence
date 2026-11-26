@@ -424,7 +424,9 @@ func (s *Server) IdentifyNetflix(ctx context.Context, c *netflix.Client) (int, e
 		return 0, err
 	}
 	n := 0
-	for _, p := range netflix.Match(pending, viewed) {
+	pairs := netflix.Match(pending, viewed)
+	pairs = append(pairs, netflix.Continuations(pending, viewed, pairs, time.Now())...)
+	for _, p := range pairs {
 		it, err := netflix.Resolve(ctx, c, s.Ident, p.Viewed)
 		if err != nil {
 			s.Log.Warn("Netflix", "title", p.Viewed.Title, "err", err)

@@ -172,3 +172,21 @@ func TestResolve(t *testing.T) {
 		t.Fatalf("movie %+v %v", mv, err)
 	}
 }
+
+func TestContinuations(t *testing.T) {
+	at := func(s string) time.Time { t, _ := time.Parse(time.RFC3339, s); return t }
+	newest := Viewed{MovieID: 1, DateMS: at("2026-11-26T15:53:00Z").UnixMilli()}
+	older := Viewed{MovieID: 2, DateMS: at("2026-11-26T10:00:00Z").UnixMilli()}
+	now := at("2026-11-26T16:40:00Z")
+	sessions := []*model.Session{
+		{ID: 1, StartedAt: at("2026-11-26T15:53:20Z")}, // matched by Match already
+		{ID: 2, StartedAt: at("2026-11-26T16:15:00Z")}, // picked up again: the same title
+		{ID: 3, StartedAt: at("2026-11-26T16:35:00Z")}, // too recent to tell yet
+		{ID: 4, StartedAt: at("2026-11-26T23:00:00Z")}, // more than 6 h later
+	}
+	matched := []Pair{{Session: sessions[0], Viewed: newest}}
+	got := Continuations(sessions, []Viewed{older, newest}, matched, now)
+	if len(got) != 1 || got[0].Session.ID != 2 || got[0].Viewed.MovieID != 1 {
+		t.Errorf("%+v", got)
+	}
+}

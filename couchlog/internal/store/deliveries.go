@@ -154,9 +154,10 @@ func splitCols(cols string) []string {
 }
 
 // SeenShortlyBefore finds an earlier session, ended within window before
-// this one started, that already holds one of these titles (same movie, or
-// same show and episode, by external ID): watching it again that soon is
-// usually the same viewing, so it waits for you to confirm it.
+// this one started, whose viewing of one of these titles (same movie, or
+// same show and episode, by external ID) already reached a destination:
+// watching it again that soon is usually the same viewing, so it waits for
+// you to confirm it. A start that was never sent does not count.
 func (s *Store) SeenShortlyBefore(ctx context.Context, w Watch, window time.Duration) (*model.Session, error) {
 	for _, it := range w.Items {
 		if it.TMDB == 0 && it.IMDb == "" {
@@ -165,6 +166,7 @@ func (s *Store) SeenShortlyBefore(ctx context.Context, w Watch, window time.Dura
 		var id int64
 		err := s.db.QueryRowContext(ctx, `SELECT s.id FROM items i JOIN sessions s ON s.id = i.session_id
 			WHERE s.id <> ? AND s.hidden <> 'ignored' AND i.replaced_at IS NULL AND i.kind = ?
+			AND EXISTS (SELECT 1 FROM deliveries d WHERE d.item_id = i.id AND d.status = 'added')
 			AND COALESCE(i.season, -1) = ? AND COALESCE(i.episode, -1) = ?
 			AND ((i.tmdb IS NOT NULL AND i.tmdb = ?) OR (i.imdb <> '' AND i.imdb = ?))
 			AND s.ended_at <= ? AND s.ended_at >= ? ORDER BY s.ended_at DESC LIMIT 1`,

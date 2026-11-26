@@ -1198,13 +1198,15 @@ REWATCH_WINDOW = 24 * 3600   # the same title again this soon: probably not a se
 
 
 def seen_shortly_before(conn, sess, items):
-    """The earlier session (ended within REWATCH_WINDOW before this one started) that already
-    has one of these titles: same movie, or same show and episode, by external ID."""
+    """The earlier session (ended within REWATCH_WINDOW before this one started) whose viewing of one
+    of these titles was already sent: same movie, or same show and episode, by external ID. A start
+    that was never sent (a minute, then you came back) does not count."""
     for it in items:
         if not (it["tmdb"] or it["imdb"]):
             continue
         row = conn.execute(
             "SELECT s.* FROM items i JOIN sessions s ON s.id = i.session_id WHERE s.id <> ? AND s.ignored = 0"
+            " AND (i.trakt_status = 'added' OR i.simkl_status = 'added')"   # a viewing that counted, not a 1-min start
             " AND i.kind = ? AND COALESCE(i.season, -1) = COALESCE(?, -1) AND COALESCE(i.episode, -1) = COALESCE(?, -1)"
             " AND ((i.tmdb IS NOT NULL AND i.tmdb = ?) OR (COALESCE(i.imdb, '') <> '' AND i.imdb = ?))"
             " AND s.ended_at <= ? AND s.ended_at >= ? ORDER BY s.ended_at DESC LIMIT 1",
@@ -1719,14 +1721,28 @@ def netflix_identify(force: bool = False) -> int:
                            (*NETFLIX_APPS, time.time() - 7 * 86400)).fetchone()[0]
     if not pending:
         return 0
-    NETFLIX_LAST["at"] = time.time()
     try:
         activity = netflix_activity(0, 50)
-    except Exception as e:
+    except Exception as e:   # a timeout or a hiccup: try again on the next round (2 min)
         print(f"Netflix: {e}", flush=True)
         return 0
+    NETFLIX_LAST["at"] = time.time()
+    pairs = netflix_matches(conn, activity)
+    # Netflix keeps one entry per title, with when you started it: picking it up again (or restarting
+    # it) adds no new entry. A session with no entry of its own, 10+ minutes in, while the newest entry
+    # is from before it (within 6 h), is that same title: a new title would have its own entry by now.
+    matched = {s["id"] for s, _ in pairs}
+    newest = max(activity, key=lambda v: v.get("date", 0), default=None)
+    if newest:
+        nd = newest["date"] / 1000
+        for s in conn.execute(
+                "SELECT * FROM sessions WHERE app_id IN (?, ?) AND ignored = 0 AND started_at > ? AND started_at < ?"
+                " AND id NOT IN (SELECT session_id FROM items) ORDER BY started_at",
+                (*NETFLIX_APPS, nd + NETFLIX_WINDOW, time.time() - 600)).fetchall():
+            if s["id"] not in matched and s["started_at"] - nd <= 6 * 3600:
+                pairs.append((s, newest))
     done = 0
-    for s, v in netflix_matches(conn, activity):
+    for s, v in pairs:
         hit = netflix_resolve(v)
         if not hit:
             continue

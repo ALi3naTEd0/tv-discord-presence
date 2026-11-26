@@ -232,8 +232,9 @@ mark per title or episode, so Check reads your lists and Remove unmarks.
 once you watched ≥ 80 % of a real (not estimated) runtime, otherwise a
 note says why; always Check before Push, so nothing is sent twice;
 `not_found` asked again daily; five failures stop retries. The same title
-again within 24 h of an earlier session (same movie, or same episode, by
-ID) is not sent on its own: it is usually one viewing resumed or recorded
+again within 24 h of an earlier viewing that was sent (same movie, or
+same episode, by ID) is not sent on its own (a start that never went out
+does not count): it is usually one viewing resumed or recorded
 twice, so the dashboard says so and its Send button confirms a real
 second viewing. Statuses:
 `pending`, `ready`, `added`, `not_found`, `skipped`, `error`, `remove` /
@@ -270,7 +271,9 @@ TV, an opaque media id on webOS), but the account keeps the viewing activity
 with the exact start time of each title (only the latest viewing per title).
 Couchlog reads it with the user's Netflix session through Netflix's internal
 web API (as Universal Trakt Scrobbler does), matches each title to the TV
-session that started within 5 min, and identifies it through TMDB with
+session that started within 5 min (a session with no entry of its own,
+10+ minutes in, is the newest entry's title when that entry is from the
+last 6 h: picking a title up again adds no entry), and identifies it through TMDB with
 Netflix's English titles and real season/episode numbers
 (`internal/netflix`; the server runs it every 10 min while Netflix sessions
 from the last week wait, with `netflix = true` in the settings).

@@ -186,12 +186,32 @@ func TestRewatchWithinADayWaits(t *testing.T) {
 	other := r.tvSession(8, 100, 95, false)
 
 	m := &memSink{has: map[int]bool{}}
-	(&Deliverer{Store: r.st, Sinks: []sink.Sink{m}, Now: func() time.Time { return t0.Add(10 * time.Hour) }}).Run(r.ctx)
+	d := &Deliverer{Store: r.st, Sinks: []sink.Sink{m}, Now: func() time.Time { return t0.Add(10 * time.Hour) }}
+	// The first viewing reaches Trakt before the second is looked at.
+	r.st.SetDelivery(r.ctx, first, "trakt", model.Added, "", t0)
+	d.Run(r.ctx)
 	if r.status(first) != model.Added || r.status(other) != model.Added || r.status(second) != model.Pending {
 		t.Errorf("first=%s second=%s other=%s", r.status(first), r.status(second), r.status(other))
 	}
 	del, _ := r.st.DeliveryOf(r.ctx, second, "trakt")
 	if del.Error == "" {
 		t.Error("no note saying why the second viewing waits")
+	}
+}
+
+// A one-minute start that was never sent, then the real viewing: one
+// viewing in two sessions, so the second is sent.
+func TestUnsentStartDoesNotHoldTheViewing(t *testing.T) {
+	r := newRig(t)
+	start := r.tvSession(7, 100, 1, false) // 1 minute: never eligible
+	s, _ := r.st.StartSession(r.ctx, r.box, model.App{ID: "com.netflix.ninja"}, "", t0.Add(20*time.Minute))
+	r.st.Touch(r.ctx, s.ID, s.StartedAt.Add(95*time.Minute), 95*time.Minute, true)
+	r.st.CloseSession(r.ctx, s.ID, 0, 0)
+	r.st.Identify(r.ctx, s.ID, []model.Item{{Identity: model.Identity{Kind: model.KindMovie, Title: "m", TMDB: 7}, RuntimeMinutes: 100}}, []string{"trakt"}, t0)
+	its, _ := r.st.Items(r.ctx, s.ID)
+	m := &memSink{has: map[int]bool{}}
+	(&Deliverer{Store: r.st, Sinks: []sink.Sink{m}}).Run(r.ctx)
+	if r.status(its[0].ID) != model.Added || r.status(start) != model.Pending {
+		t.Errorf("viewing=%s start=%s", r.status(its[0].ID), r.status(start))
 	}
 }
