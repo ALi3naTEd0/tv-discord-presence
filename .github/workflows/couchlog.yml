@@ -1,0 +1,55 @@
+name: couchlog
+
+on:
+  push:
+    branches: [go-rewrite]
+    paths: ["couchlog/**", ".github/workflows/couchlog.yml"]
+  pull_request:
+    paths: ["couchlog/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: couchlog
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: couchlog/go.mod
+          cache-dependency-path: couchlog/go.sum
+      - run: go vet ./...
+      - run: go test -race ./...
+        if: runner.os == 'Linux'
+      - run: go test ./...
+        if: runner.os != 'Linux'
+
+  # Couchlog's own TMDB key, from the repository secret: the same one release
+  # builds get at compile time. Skipped where secrets are not available
+  # (pull requests from forks).
+  tmdb-live:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: couchlog
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: couchlog/go.mod
+          cache-dependency-path: couchlog/go.sum
+      - name: TMDB with the built-in key
+        env:
+          COUCHLOG_TMDB_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          if [ -z "$COUCHLOG_TMDB_KEY" ]; then echo "No TMDB_API_KEY secret here: skipped"; exit 0; fi
+          go test ./internal/identify -run Live -v -count=1
