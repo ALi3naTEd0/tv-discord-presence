@@ -3,7 +3,7 @@
 //	couchlog init --from-tvpresence [config.toml]   settings from tvpresence's (same TV, box, keys)
 //	couchlog server [-config path]                  listen to the TVs, import Plex
 //	couchlog compare [-since 24h] [-diff]           Go vs tvpresence, session by session
-//	couchlog connect netflix [-cookie ...]          sign in to Netflix in Couchlog's own window
+//	couchlog connect netflix                        sign in to Netflix in Couchlog's own window
 //	couchlog import [-db path] [history.db]         bring in a tvpresence history
 package main
 

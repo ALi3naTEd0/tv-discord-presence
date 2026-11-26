@@ -262,11 +262,13 @@ password, no separate app):
    Netflix refuses the sign-in, and hiding that would be evading its bot
    detection, which Couchlog does not do. The session is saved (0600)
    next to the database, renewed cookies are written back, and it is the
-   first source from then on. `-cookie "NetflixId=…; …"` saves a pasted
-   session instead.
-3. **No PC:** paste the cookie in the dashboard. Later, optionally: a
-   headless browser on the server shown inside the dashboard, so even a
-   phone can sign in (a separate image: Chromium is ~300 MB).
+   first source from then on.
+
+There is deliberately no third, technical way (pasting cookies, editing
+files): the dashboard explains, next to each unidentified Netflix session,
+what Netflix does not tell the TV and that one sign-in fixes it. A home
+with only a phone and a headless server needs a computer once for that
+sign-in.
 
 A PWA cannot do 2 (cross-site cookies), which is why it lives in the
 binary, not the dashboard.

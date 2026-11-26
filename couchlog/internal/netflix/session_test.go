@@ -31,13 +31,6 @@ func TestSavedSessionComesFirst(t *testing.T) {
 	}
 }
 
-func TestParseCookieHeader(t *testing.T) {
-	c := ParseCookieHeader(" NetflixId=a%3Db; SecureNetflixId=v%3D2 ;nfvdid=x ; bad")
-	if len(c) != 3 || c["NetflixId"] != "a%3Db" || c["SecureNetflixId"] != "v%3D2" {
-		t.Errorf("%v", c)
-	}
-}
-
 func TestRenewedCookiesAreKept(t *testing.T) {
 	path := SessionPath(t.TempDir())
 	(&Saved{Cookies: map[string]string{"NetflixId": "old", "SecureNetflixId": "s"}, How: "connect"}).Save(path)

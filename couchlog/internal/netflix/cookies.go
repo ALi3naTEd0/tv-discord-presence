@@ -6,9 +6,10 @@
 // Universal Trakt Scrobbler does (MIT, github.com/trakt-tools/
 // universal-trakt-scrobbler); it is not public and can move.
 //
-// The session comes, in order, from a readable browser on this machine
-// (BrowserCookies), from "Connect Netflix" in the couchlog binary (to do),
-// or from a pasted cookie (to do). It is only ever sent to Netflix.
+// The session comes from "Connect Netflix" (Couchlog's own browser window,
+// see Connect) or, with nothing to do at all, from a browser on this
+// machine that is already signed in (BrowserCookies). It is only ever sent
+// to Netflix.
 package netflix
 
 import (

@@ -17,13 +17,13 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-// Saved is the Netflix session Couchlog owns: taken from its own browser
-// window ("Connect Netflix") or pasted. It lives in a 0600 file next to the
+// Saved is the Netflix session Couchlog owns, taken from its own browser
+// window ("Connect Netflix"). It lives in a 0600 file next to the
 // database and is only ever sent to Netflix.
 type Saved struct {
 	Cookies map[string]string `json:"cookies"`
 	SavedAt time.Time         `json:"saved_at"`
-	How     string            `json:"how"` // connect | paste
+	How     string            `json:"how"` // connect
 }
 
 // SessionPath is where the saved session lives, in Couchlog's folder.
@@ -70,19 +70,6 @@ func SessionCookies(path string) func() (map[string]string, string, error) {
 		}
 		return BrowserCookies()
 	}
-}
-
-// ParseCookieHeader reads "NetflixId=...; SecureNetflixId=..." as pasted
-// from a browser's developer tools.
-func ParseCookieHeader(s string) map[string]string {
-	out := map[string]string{}
-	for _, part := range strings.Split(s, ";") {
-		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
-		if ok && k != "" {
-			out[strings.TrimSpace(k)] = strings.TrimSpace(v)
-		}
-	}
-	return out
 }
 
 // Chromium-family browsers, in order of preference; Edge comes with every

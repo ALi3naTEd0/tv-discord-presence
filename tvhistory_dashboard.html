@@ -372,7 +372,7 @@ function renderList() {
           <ul class="items">${s.items.map(i => `<li><span class="meta">${epLine(i)}</span><div class="chips">${statusChip("trakt", i)}${statusChip("simkl", i)}</div></li>`).join("")}</ul>`
           : `${s.hint_title ? `<div class="title" style="margin-top:6px">${esc(s.hint_title)}</div>
              <div class="meta">${s.hint_season != null ? `S${s.hint_season} · E${s.hint_episode} · ` : ""}${s.source === "plex" ? `per ${esc(s.app_name)}, no external IDs found yet` : "reported by the device"}</div>` : ""}
-             <div class="chips"><span class="chip warn">unidentified</span></div>`}
+             <div class="chips"><span class="chip warn">unidentified</span></div>${netflixHint(s)}`}
         ${k === "ignored" ? `<div class="chips"><span class="chip">ignored</span></div>` : ""}
         <div class="actions">
           <button data-a="identify">${s.items.length ? "Change" : "Identify"}</button>
@@ -428,17 +428,28 @@ $("#plexImport").addEventListener("click", async e => {
   b.disabled = false; b.textContent = "Import from Plex"; await refresh();
 });
 // Netflix: connected (and as which profile), or a button that opens Couchlog's own sign-in window
-let netflixTimer = null;
+var netflixTimer = null, netflixState = {};
+// Under an unidentified Netflix session: what to do about it, in plain words
+const NETFLIX_APPS = ["com.netflix.ninja", "netflix"];
+function netflixHint(s) {
+  if (!NETFLIX_APPS.includes(s.app_id)) return "";
+  return netflixState.connected
+    ? `<div class="hint">Netflix doesn't tell the TV what's playing, so Couchlog checks your Netflix account every few minutes and fills this in. If it stays like this, pick the title yourself.</div>`
+    : `<div class="hint">Netflix doesn't tell the TV what's playing. Press <b>Connect Netflix</b> at the top, sign in and pick your profile (the window closes by itself), and Couchlog will fill this in from your account.</div>`;
+}
 async function renderNetflix() {
   const b = $("#netflix");
   let st;
   try { st = await api("/api/netflix/status"); } catch { b.style.display = "none"; return; }
+  const changed = !!st.connected !== !!netflixState.connected;
+  netflixState = st;
+  if (changed && state) renderList();
   b.style.display = "";
   b.disabled = !!st.connecting;
   b.innerHTML = st.connecting ? `<span class="spin"></span> ${esc(st.reason || "Connecting…")}`
     : st.connected ? `Netflix: ${esc(st.profile || "connected")}` : "Connect Netflix";
-  b.title = st.connected ? `Reading your viewing activity (${st.browser_profile || ""}). Click to reconnect.`
-    : (st.reason || "Sign in once in a Netflix window; Couchlog does the rest");
+  b.title = st.connected ? "Couchlog reads your Netflix viewing activity to know what you watched on the TV. Click to connect again."
+    : "Netflix doesn't tell the TV what's playing. Sign in once in the window that opens and pick your profile; it closes by itself.";
   clearTimeout(netflixTimer);
   if (st.connecting) netflixTimer = setTimeout(renderNetflix, 3000);
   return st;
