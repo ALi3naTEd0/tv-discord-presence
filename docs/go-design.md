@@ -228,6 +228,34 @@ time ≥ 80 % of the runtime (Plex always), check first so nothing is
 duplicated, `not_found` retried at most daily. Requests respect `Retry-After`
 and back off like CatchMe's downloader.
 
+## Netflix
+
+Netflix publishes nothing on the TV (no media session metadata on Android
+TV, an opaque media id on webOS), but the account keeps the viewing activity
+with the exact start time of each title (only the latest viewing per title).
+Couchlog reads it with the user's Netflix session through Netflix's internal
+web API (as Universal Trakt Scrobbler does), matches each title to the TV
+session that started within 5 min, and identifies it through TMDB with
+Netflix's English titles and real season/episode numbers. Prototype in the
+Python dashboard (`netflix_identify`); to port.
+
+Getting the session, universally, without an extension or a password:
+
+1. **Automatic:** a readable browser on the same machine already has it
+   (Firefox family: plain cookie store; Chromium on Linux/macOS; not
+   Chrome/Edge on Windows, which use App-Bound Encryption).
+2. **Connect Netflix** in the companion app (Flutter: desktop, Android,
+   iOS): its own web view with netflix.com, sign in once, the app reads the
+   cookies of its own web view (HttpOnly included) and hands them to the
+   home server over the pairing. The server owns the session from then on;
+   the dashboard says "reconnect" when Netflix invalidates it. A PWA cannot
+   do this (cross-site cookies).
+3. Last resort: paste the cookie.
+
+To verify: whether Netflix accepts a session signed in on mobile data and
+used from the home IP, whether it rotates the cookie on use, how long it
+lasts.
+
 ## Store (SQLite)
 
 Pure-Go SQLite (`modernc.org/sqlite`, no CGO, so it cross-compiles). Times are
