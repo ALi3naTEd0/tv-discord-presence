@@ -231,7 +231,11 @@ mark per title or episode, so Check reads your lists and Remove unmarks.
 `internal/deliver` keeps today's rules: Plex plays always; TV sessions
 once you watched ≥ 80 % of a real (not estimated) runtime, otherwise a
 note says why; always Check before Push, so nothing is sent twice;
-`not_found` asked again daily; five failures stop retries. Statuses:
+`not_found` asked again daily; five failures stop retries. The same title
+again within 24 h of an earlier session (same movie, or same episode, by
+ID) is not sent on its own: it is usually one viewing resumed or recorded
+twice, so the dashboard says so and its Send button confirms a real
+second viewing. Statuses:
 `pending`, `ready`, `added`, `not_found`, `skipped`, `error`, `remove` /
 `removed`.
 

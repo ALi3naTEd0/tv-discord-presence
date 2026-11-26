@@ -152,3 +152,45 @@ func splitCols(cols string) []string {
 	}
 	return out
 }
+
+// SeenShortlyBefore finds an earlier session, ended within window before
+// this one started, that already holds one of these titles (same movie, or
+// same show and episode, by external ID): watching it again that soon is
+// usually the same viewing, so it waits for you to confirm it.
+func (s *Store) SeenShortlyBefore(ctx context.Context, w Watch, window time.Duration) (*model.Session, error) {
+	for _, it := range w.Items {
+		if it.TMDB == 0 && it.IMDb == "" {
+			continue
+		}
+		var id int64
+		err := s.db.QueryRowContext(ctx, `SELECT s.id FROM items i JOIN sessions s ON s.id = i.session_id
+			WHERE s.id <> ? AND s.hidden <> 'ignored' AND i.replaced_at IS NULL AND i.kind = ?
+			AND COALESCE(i.season, -1) = ? AND COALESCE(i.episode, -1) = ?
+			AND ((i.tmdb IS NOT NULL AND i.tmdb = ?) OR (i.imdb <> '' AND i.imdb = ?))
+			AND s.ended_at <= ? AND s.ended_at >= ? ORDER BY s.ended_at DESC LIMIT 1`,
+			w.Session.ID, string(it.Kind), seasonOrNone(it), episodeOrNone(it), it.TMDB, it.IMDb,
+			ms(w.Session.StartedAt.Add(time.Minute)), ms(w.Session.StartedAt.Add(-window))).Scan(&id)
+		if err == sql.ErrNoRows {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+		return s.Session(ctx, id)
+	}
+	return nil, nil
+}
+
+func seasonOrNone(it model.Item) int {
+	if it.Kind == model.KindMovie {
+		return -1
+	}
+	return it.Season
+}
+
+func episodeOrNone(it model.Item) int {
+	if it.Kind == model.KindMovie {
+		return -1
+	}
+	return it.Episode
+}

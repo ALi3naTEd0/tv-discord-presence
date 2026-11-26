@@ -171,3 +171,27 @@ func TestWatchedTimesSpread(t *testing.T) {
 		t.Errorf("%v", got)
 	}
 }
+
+func TestRewatchWithinADayWaits(t *testing.T) {
+	r := newRig(t)
+	first := r.tvSession(7, 100, 95, false)
+	// The same film again, starting two hours after the first ended.
+	s, _ := r.st.StartSession(r.ctx, r.box, model.App{ID: "com.netflix.ninja"}, "", t0.Add(95*time.Minute+2*time.Hour))
+	r.st.Touch(r.ctx, s.ID, s.StartedAt.Add(95*time.Minute), 95*time.Minute, true)
+	r.st.CloseSession(r.ctx, s.ID, 0, 0)
+	r.st.Identify(r.ctx, s.ID, []model.Item{{Identity: model.Identity{Kind: model.KindMovie, Title: "m", TMDB: 7}, RuntimeMinutes: 100}}, []string{"trakt"}, t0)
+	its, _ := r.st.Items(r.ctx, s.ID)
+	second := its[0].ID
+	// another title in between is unaffected
+	other := r.tvSession(8, 100, 95, false)
+
+	m := &memSink{has: map[int]bool{}}
+	(&Deliverer{Store: r.st, Sinks: []sink.Sink{m}, Now: func() time.Time { return t0.Add(10 * time.Hour) }}).Run(r.ctx)
+	if r.status(first) != model.Added || r.status(other) != model.Added || r.status(second) != model.Pending {
+		t.Errorf("first=%s second=%s other=%s", r.status(first), r.status(second), r.status(other))
+	}
+	del, _ := r.st.DeliveryOf(r.ctx, second, "trakt")
+	if del.Error == "" {
+		t.Error("no note saying why the second viewing waits")
+	}
+}

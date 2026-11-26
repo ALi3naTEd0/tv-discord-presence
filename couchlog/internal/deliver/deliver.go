@@ -30,8 +30,12 @@ type Deliverer struct {
 	// added, nothing is sent or removed.
 	ReadOnly bool
 	MinRatio float64 // share of the runtime to send a TV session; 0 = 0.8
-	Log      *slog.Logger
-	Now      func() time.Time
+	// Rewatch: the same title again within this long after an earlier
+	// session is not sent on its own (usually the same viewing, resumed or
+	// recorded twice); you confirm a real second viewing. 0 = 24 h.
+	Rewatch time.Duration
+	Log     *slog.Logger
+	Now     func() time.Time
 }
 
 func (d *Deliverer) now() time.Time {
@@ -129,8 +133,22 @@ func (d *Deliverer) Run(ctx context.Context) (Report, error) {
 func (d *Deliverer) runSink(ctx context.Context, sk sink.Sink, watches []store.Watch, rep Report) error {
 	name, now := sk.Name(), d.now()
 	var due []sink.Entry
+	rewatch := d.Rewatch
+	if rewatch == 0 {
+		rewatch = 24 * time.Hour
+	}
 	for _, w := range watches {
 		ok, note := d.Eligible(w)
+		if ok {
+			prev, err := d.Store.SeenShortlyBefore(ctx, w, rewatch)
+			if err != nil {
+				return err
+			}
+			if prev != nil {
+				ok, note = false, fmt.Sprintf("You already watched this (%s): not sent automatically. Send it if it was a second viewing",
+					prev.EndedAt.Local().Format("Jan 2 15:04"))
+			}
+		}
 		times := WatchedTimes(w)
 		for _, it := range w.Items {
 			del, err := d.Store.DeliveryOf(ctx, it.ID, name)

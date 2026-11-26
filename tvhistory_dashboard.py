@@ -1194,6 +1194,27 @@ def expected_seconds(items) -> float | None:
     return total
 
 
+REWATCH_WINDOW = 24 * 3600   # the same title again this soon: probably not a second viewing
+
+
+def seen_shortly_before(conn, sess, items):
+    """The earlier session (ended within REWATCH_WINDOW before this one started) that already
+    has one of these titles: same movie, or same show and episode, by external ID."""
+    for it in items:
+        if not (it["tmdb"] or it["imdb"]):
+            continue
+        row = conn.execute(
+            "SELECT s.* FROM items i JOIN sessions s ON s.id = i.session_id WHERE s.id <> ? AND s.ignored = 0"
+            " AND i.kind = ? AND COALESCE(i.season, -1) = COALESCE(?, -1) AND COALESCE(i.episode, -1) = COALESCE(?, -1)"
+            " AND ((i.tmdb IS NOT NULL AND i.tmdb = ?) OR (COALESCE(i.imdb, '') <> '' AND i.imdb = ?))"
+            " AND s.ended_at <= ? AND s.ended_at >= ? ORDER BY s.ended_at DESC LIMIT 1",
+            (sess["id"], it["kind"], it["season"], it["episode"], it["tmdb"], it["imdb"] or "",
+             sess["started_at"] + 60, sess["started_at"] - REWATCH_WINDOW)).fetchone()
+        if row:
+            return row
+    return None
+
+
 def auto_push() -> None:
     """Send identified sessions once they end, like a scrobble would: TV/Android TV sessions only if
     at least auto_push_min_ratio of the runtime was played; Plex views always (Plex already marked
@@ -1212,6 +1233,14 @@ def auto_push() -> None:
         items = conn.execute("SELECT * FROM items WHERE session_id=?", (sess["id"],)).fetchall()
         if any(it["auto_how"] == "progress" for it in items):
             continue   # a guessed episode waits for you to confirm it
+        prev = seen_shortly_before(conn, sess, items)
+        if prev:   # watched again within a day: you confirm it with Send if it was a second viewing
+            when = datetime.fromtimestamp(prev["ended_at"]).strftime("%b %d %H:%M")
+            note = f"You already watched this ({when}): not sent automatically. Press Send if it was a second viewing"
+            conn.execute("UPDATE items SET trakt_error=CASE WHEN trakt_status IN ('pending','ready') THEN ? ELSE trakt_error END,"
+                         " simkl_error=CASE WHEN simkl_status IN ('pending','ready') THEN ? ELSE simkl_error END"
+                         " WHERE session_id=?", (note, note, sess["id"]))
+            continue
         if sess["source"] != "plex":
             if any(it["runtime_est"] for it in items):
                 note = "Runtime is only an estimate from TMDB: not sent automatically. Send it if you finished it"
