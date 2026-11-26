@@ -263,3 +263,15 @@ func copyFile(from, to string) error {
 	}
 	return out.Close()
 }
+
+func TestOpenPathWithURICharacters(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "50% off?#x", "couchlog.db")
+	s, err := Open(context.Background(), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if _, err := os.Stat(p); err != nil {
+		t.Errorf("database not at the given path: %v", err)
+	}
+}

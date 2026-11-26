@@ -33,6 +33,13 @@ func (s *Store) Identify(ctx context.Context, sessionID int64, items []model.Ite
 		return fmt.Errorf("store: %w", err)
 	}
 	defer tx.Rollback()
+	if err := identifyTx(ctx, tx, sessionID, items, sinks, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func identifyTx(ctx context.Context, tx *sql.Tx, sessionID int64, items []model.Item, sinks []string, now time.Time) error {
 	if err := tx.QueryRowContext(ctx, "SELECT id FROM sessions WHERE id = ?", sessionID).Scan(new(int64)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrNoSession
@@ -108,7 +115,7 @@ func (s *Store) Identify(ctx context.Context, sessionID int64, items []model.Ite
 	if _, err := tx.ExecContext(ctx, "UPDATE sessions SET hidden = '' WHERE id = ? AND hidden = 'short'", sessionID); err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
-	return tx.Commit()
+	return nil
 }
 
 // RemoveDone records that a sink took a replaced item's play out of your

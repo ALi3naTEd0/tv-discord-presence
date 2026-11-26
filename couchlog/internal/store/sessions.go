@@ -343,3 +343,85 @@ func nullInt(v int) any {
 	}
 	return v
 }
+
+// SplitNext ends the open session now and starts the next one with next as
+// its item: the app autoplayed the next episode without leaving the player.
+// The new session remembers where it came from (AutoNextFrom) so the
+// dashboard can offer Undo, and starts with the format already reported,
+// because the device only reports it when a decoder starts.
+func (s *Store) SplitNext(ctx context.Context, id int64, next model.Item, sinks []string, now time.Time) (*model.Session, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `UPDATE sessions SET state = 'closed', ended_at = ?, live_position_ms = NULL
+		WHERE id = ? AND state = 'open'`, ms(now), id)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, ErrNoSession
+	}
+	res, err = tx.ExecContext(ctx, `INSERT INTO sessions(user_id, device_id, source_key, app_id, app_name,
+		started_at, last_seen_at, last_play_at, media_id, video_codec, video_width, video_height, video_hdr, auto_next_from)
+		SELECT user_id, device_id, 'next:' || id, app_id, app_name, ?, ?, ?, media_id,
+		       video_codec, video_width, video_height, video_hdr, id
+		FROM sessions WHERE id = ?`, ms(now), ms(now), ms(now), id)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	nid, _ := res.LastInsertId()
+	if err := identifyTx(ctx, tx, nid, []model.Item{next}, sinks, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	return s.Session(ctx, nid)
+}
+
+// ErrNotAutoSplit means UndoNext was asked for a session that was not split
+// automatically, or whose item already reached a service (use a correction).
+var ErrNotAutoSplit = errors.New("store: not an automatic split that can be undone")
+
+// UndoNext reverts an automatic split that was wrong (you went back to the
+// start of the same episode): its time goes back to the previous session,
+// which takes its state, and the split session is deleted. It returns the
+// previous session.
+func (s *Store) UndoNext(ctx context.Context, id int64) (*model.Session, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer tx.Rollback()
+	var prev sql.NullInt64
+	var added int
+	err = tx.QueryRowContext(ctx, `SELECT auto_next_from, (SELECT COUNT(*) FROM deliveries d JOIN items i ON i.id = d.item_id
+		WHERE i.session_id = sessions.id AND d.status = 'added') FROM sessions WHERE id = ?`, id).Scan(&prev, &added)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNoSession
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	if !prev.Valid || added > 0 {
+		return nil, ErrNotAutoSplit
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET
+		state = n.state, ended_at = n.ended_at,
+		last_seen_at = MAX(sessions.last_seen_at, n.last_seen_at),
+		last_play_at = MAX(sessions.last_play_at, n.last_play_at),
+		played_ms = sessions.played_ms + n.played_ms,
+		live_position_ms = n.live_position_ms
+		FROM (SELECT * FROM sessions WHERE id = ?) AS n WHERE sessions.id = ?`, id, prev.Int64); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE id = ?", id); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	return s.Session(ctx, prev.Int64)
+}

@@ -115,9 +115,37 @@ times, no TV needed (`internal/engine`, done). The database stays the source
 of truth, because the dashboard can close or split a session at any moment.
 The Python version's behaviour is the reference: the parallel run compares both.
 
-Not ported yet: the autoplay split ("next episode" when an identified episode
-passed 80 % and the position restarts). It needs identification, so it comes
-with `internal/identify`.
+The autoplay split is ported too: with a real position (Android TV), when the
+identified episode passed 80 % of its TMDB runtime (not an estimate), at least
+half of it was played, and the position restarts under 5 min, the tracker
+asks `identify` for the next episode and `store.SplitNext` closes the session
+and opens the next one with `auto_next_from` set. `store.UndoNext` gives the
+time back when it was the same episode from the start.
+
+## Identification
+
+`internal/identify` uses what already exists, TMDB, instead of a catalog of
+its own. One key per Couchlog build (the v4 read token or a v3 key), responses
+cached 6 h.
+
+- **Search** (the picker): a pasted IMDb id, TMDB link / `tmdb:movie:123` or
+  TheTVDB link / `tvdb:123` resolves directly; anything else searches movies
+  and shows by title.
+- **Item**: the picked title becomes an item with TMDB, IMDb and TVDB ids,
+  poster, the episode's title and runtime. When TMDB has no runtime for the
+  episode yet, the show's usual length is used and marked *estimated* (never
+  auto-sent).
+- **Auto**, when a device publishes a title (Android TV): an alias wins;
+  otherwise exactly one TMDB title whose name or original name is the
+  published one, a show when the device gave episode numbers and a movie when
+  not. Two films with that name (remakes) or no exact match: left for the
+  user, because a wrong guess reaches Trakt. YouTube titles are video names,
+  so there only aliases identify.
+- **Next**: the episode after this one, rolling over to the next season with
+  episodes.
+
+Not ported (yet): the IMDb suggestion search the Python picker merges in (an
+unofficial endpoint) and TVmaze as a fallback for episodes TMDB has not added.
 
 ## Corrections and aliases (instead of a remap file)
 

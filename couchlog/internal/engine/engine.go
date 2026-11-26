@@ -10,6 +10,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -105,9 +106,10 @@ type Event struct {
 type EventKind string
 
 const (
-	Opened  EventKind = "opened"
-	Resumed EventKind = "resumed" // same title came back, or kept after a restart
-	Ended   EventKind = "closed"
+	Opened   EventKind = "opened"
+	Resumed  EventKind = "resumed" // same title came back, or kept after a restart
+	AutoNext EventKind = "next"    // the app autoplayed the next episode: split onto it
+	Ended    EventKind = "closed"
 )
 
 // Tracker follows one device. It is not safe for concurrent use: feed it
@@ -126,6 +128,12 @@ type Tracker struct {
 
 	// OnEvent, if set, is called for every session change.
 	OnEvent func(Event)
+
+	// Next, if set, returns the episode after an identified one
+	// (identify.Identifier.Next). With it the tracker splits the session
+	// when an app autoplays the next episode; Sinks get its deliveries.
+	Next  func(ctx context.Context, cur model.Item) (model.Item, error)
+	Sinks []string
 }
 
 // NewTracker starts following a device: open sessions left by a previous run
@@ -249,6 +257,11 @@ func (t *Tracker) Observe(ctx context.Context, o model.Observation) (*model.Sess
 			return nil, err
 		}
 	}
+	if playing && o.Position != nil && sess.LivePosition != nil && t.Next != nil {
+		if next := t.autoplay(ctx, sess, *sess.LivePosition, *o.Position, now); next != nil {
+			sess = next
+		}
+	}
 	if o.Position != nil {
 		if err := t.st.SetPosition(ctx, sess.ID, *o.Position); err != nil {
 			return nil, err
@@ -285,4 +298,45 @@ func (t *Tracker) Observe(ctx context.Context, o model.Observation) (*model.Sess
 	}
 	t.prevPlaying = playing
 	return t.st.Session(ctx, sess.ID)
+}
+
+// autoplay splits the session onto the next episode when the app moved on
+// by itself, which only a real position shows (Android TV): the identified
+// episode was past 80 % of its runtime and playback restarted near zero.
+// It returns the new session, or nil when nothing changed. Failures (TMDB
+// down) are logged and leave the session as it is; the dashboard's "next
+// episode" button does the same by hand.
+func (t *Tracker) autoplay(ctx context.Context, sess *model.Session, prev, pos time.Duration, now time.Time) *model.Session {
+	if pos >= 5*time.Minute || prev-pos < 10*time.Minute {
+		return nil
+	}
+	items, err := t.st.Items(ctx, sess.ID)
+	if err != nil || len(items) == 0 {
+		return nil
+	}
+	cur := items[len(items)-1]
+	runtime := time.Duration(cur.RuntimeMinutes) * time.Minute
+	if cur.Kind != model.KindEpisode || runtime == 0 || cur.RuntimeEstimated || prev < runtime*8/10 {
+		return nil
+	}
+	// Real watching, not a skip to the end: Netflix can jump back to an
+	// earlier episode while you are away, and seeking that one to its end
+	// must not look like this episode finishing.
+	if sess.Played < runtime/2 {
+		t.log.Info("position jumped back but little was played: not the next episode",
+			"session", sess.ID, "from", prev, "to", pos, "played", sess.Played)
+		return nil
+	}
+	next, err := t.Next(ctx, cur)
+	if err != nil {
+		t.log.Warn("autoplay: no next episode", "session", sess.ID, "err", err)
+		return nil
+	}
+	ns, err := t.st.SplitNext(ctx, sess.ID, next, t.Sinks, now)
+	if err != nil {
+		t.log.Warn("autoplay: split failed", "session", sess.ID, "err", err)
+		return nil
+	}
+	t.emit(Event{Kind: AutoNext, Session: ns.ID, Reason: fmt.Sprintf("S%dE%d", next.Season, next.Episode)})
+	return ns
 }
