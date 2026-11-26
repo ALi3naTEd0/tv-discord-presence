@@ -8,12 +8,25 @@ Go version gives the same results on the same TVs (see *Migration*).
 1. **Installs in one step, anywhere.** One static binary for Linux, Windows and
    macOS on amd64 and arm64, a multi-arch Docker image and an AUR package. No
    Python, no venv, no trakt-scrobbler, no hand-made API keys.
-2. **Your own history first.** Couchlog records what you watch on any TV or
-   player. Trakt and Simkl are *destinations*; Discord is an optional extra.
+2. **Your own history first, useful with no accounts.** Couchlog records what
+   you watch on any TV or player and works with zero sign-ins. Trakt, Simkl,
+   Letterboxd (CSV export) and Discord are optional *outputs*, never required.
 3. **Server anywhere, presence on the desktop.** The history can live on a
    NAS or a Raspberry Pi that is always on, while Discord Rich Presence (which
    only works through Discord's local IPC) runs on the PC where Discord is.
 4. **Room for a hosted mode later**, without building it now.
+
+## Product direction
+
+Couchlog is not another scrobbler and not another title database. It uses
+what already exists (TMDB, TVDB, where-to-watch data) to organize a history
+that is captured automatically, for any user, passive or hardcore. The value
+is what the history makes possible: time and cost per service, what's next
+and where, alerts for new seasons or watchlist titles arriving on a service
+you pay for, a yearly summary. The local product is complete and free; a
+paid tier, if any, covers infrastructure only (sync across homes and phone,
+push alerts, backup). Open question: household profiles (who watched what),
+see the project note.
 
 ## One binary, two modes
 
@@ -96,9 +109,49 @@ The engine keeps one open session per device and applies today's rules
 - resumes the open session after a restart within `resume_window` (10 min)
 - on Android TV, coming back to the same title within 6 h continues the session
 
-The engine is a pure state machine over observations plus a clock, so every
-rule gets a table test with a fake clock, no TV needed. The Python version's
-behaviour is the reference: the parallel run compares both.
+The engine is a state machine over observations: time comes from each
+observation, never the wall clock, so every rule has a test with made-up
+times, no TV needed (`internal/engine`, done). The database stays the source
+of truth, because the dashboard can close or split a session at any moment.
+The Python version's behaviour is the reference: the parallel run compares both.
+
+Not ported yet: the autoplay split ("next episode" when an identified episode
+passed 80 % and the position restarts). It needs identification, so it comes
+with `internal/identify`.
+
+## Corrections and aliases (instead of a remap file)
+
+trakt-scrobbler needs `remap_rules.toml` because it sends *titles* and lets
+Trakt's search pick the item, which picks wrong for foreign titles,
+remakes and same-name films. Couchlog sends **IDs** (TMDB / IMDb / TVDB), so
+that whole class of error does not happen: the films in the current remap
+file that also went through Couchlog are in Trakt and Simkl correctly with no
+rule at all.
+
+What can still be wrong is the identification itself: Plex matched the wrong
+film, the picker's first result was the wrong one, or you chose badly. Two
+pieces cover it:
+
+1. **Correcting reaches the services.** `store.Identify` replaces a session's
+   items. An old item that is the same title (same ID) is kept with its
+   deliveries, so fixing a year or poster sends nothing again. An old item
+   never sent is deleted. An old item already *added* somewhere is kept as
+   replaced and those deliveries become `remove`: the sync takes that one play
+   (at its watched time, never other viewings) back out of Trakt / Simkl,
+   then `removed`, and the item is deleted once no service has it.
+   The Python dashboard today deletes the old items and leaves the wrong
+   entry in Trakt; this fixes that.
+2. **Aliases remember a correction.** "What this app (or any app, or Plex)
+   calls *X* (in year *Y*, or any year) is *this ID*." Made from the dashboard
+   when you correct something ("remember for next time"), matched with
+   normalized titles (case, accents, punctuation do not matter), the most
+   specific first (this app over any, this year over any), with a hit count so
+   dead ones can be cleaned up. They always resolve to an external ID.
+   Identification checks aliases before searching; the Plex importer checks
+   `plex` aliases before trusting Plex's own match.
+
+Importing `remap_rules.toml` is not worth it: its rules point at Trakt slugs,
+the files are a handful, and those plays are already correct.
 
 ## Sinks
 
@@ -112,7 +165,7 @@ type Sink interface {
 
 Statuses per item and sink are the ones in use today: `pending`, `ready`
 (exists on the service, not in your history yet), `added`, `not_found`,
-`skipped`, `error`. Auto-send keeps today's rule: identified, closed, watched
+`skipped`, `error`, plus `remove` / `removed` for corrections (see below). Auto-send keeps today's rule: identified, closed, watched
 time ≥ 80 % of the runtime (Plex always), check first so nothing is
 duplicated, `not_found` retried at most daily. Requests respect `Retry-After`
 and back off like CatchMe's downloader.
@@ -134,8 +187,11 @@ sessions     id, user_id, device_id, source_key UNIQUE, app_id, app_name,
              video_codec, video_width, video_height, video_hdr, video_hdr_ms (JSON),
              auto_next_from
 items        id, session_id, kind (movie|episode), title, year, season, episode,
-             episode_title, tmdb, tvdb, imdb, poster, runtime_min, runtime_estimated
+             episode_title, tmdb, tvdb, imdb, poster, runtime_min, runtime_estimated,
+             replaced_at (a correction replaced it; kept until every service removed it)
 deliveries   item_id, sink, status, error, attempts, updated_at   PRIMARY KEY (item_id, sink)
+aliases      id, user_id, app_id, match_title, match_year, kind, title, year,
+             tmdb, tvdb, imdb, hits, created_at   UNIQUE (user_id, app_id, match_title, match_year)
 credentials  user_id, service, data (JSON), updated_at            PRIMARY KEY (user_id, service)
 schema_version
 ```

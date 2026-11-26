@@ -1,0 +1,288 @@
+// Package engine turns what a device reports (observations) into playback
+// sessions. It applies tvpresence's rules unchanged: those rules are the
+// reference the parallel run compares against.
+//
+// The database is the source of truth, not the tracker: the dashboard may
+// close or split a session (next episode) at any moment, and the tracker
+// picks that up on its next observation. Time comes from the observations,
+// never from the wall clock, so every rule is testable with made-up times.
+package engine
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/ALi3naTEd0/couchlog/internal/model"
+	"github.com/ALi3naTEd0/couchlog/internal/store"
+)
+
+// Config holds the session rules. Zero fields take the defaults.
+type Config struct {
+	MinPlayed      time.Duration            // shorter unidentified sessions are dropped (120 s)
+	MinPlayedByApp map[string]time.Duration // per-app minimum; under it kept hidden as Short (YouTube 20 min)
+	PauseTimeout   time.Duration            // paused or in menus this long ends the session (30 min)
+	CloseGrace     time.Duration            // no recorded app in front this long closes it (60 s)
+	ResumeWindow   time.Duration            // after a restart, keep the open session if seen this recently (10 min)
+	ReopenWithin   time.Duration            // same title back within this continues the session, where media ids are titles (6 h)
+	MaxGap         time.Duration            // a longer gap between observations is not counted as playback (30 s)
+	ExcludeApps    map[string]bool          // never recorded (music, Twitch)
+}
+
+// Defaults are tvpresence's values.
+var Defaults = Config{
+	MinPlayed: 120 * time.Second,
+	MinPlayedByApp: map[string]time.Duration{
+		"com.google.android.youtube.tv": 20 * time.Minute,
+		"youtube.leanback.v4":           20 * time.Minute,
+	},
+	PauseTimeout: 30 * time.Minute,
+	CloseGrace:   60 * time.Second,
+	ResumeWindow: 10 * time.Minute,
+	ReopenWithin: 6 * time.Hour,
+	MaxGap:       30 * time.Second,
+	// tvpresence's lists. Plex is excluded on the box because the Plex
+	// source records it with exact IDs.
+	ExcludeApps: map[string]bool{
+		"tv.twitch.tv.starshot.lg":           true,
+		"com.spotify.tv.android":             true,
+		"tv.twitch.android.app":              true,
+		"com.plexapp.android":                true,
+		"com.google.android.youtube.tvmusic": true,
+	},
+}
+
+func (c Config) withDefaults() Config {
+	d := Defaults
+	if c.MinPlayed > 0 {
+		d.MinPlayed = c.MinPlayed
+	}
+	if c.MinPlayedByApp != nil {
+		d.MinPlayedByApp = c.MinPlayedByApp
+	}
+	if c.PauseTimeout > 0 {
+		d.PauseTimeout = c.PauseTimeout
+	}
+	if c.CloseGrace > 0 {
+		d.CloseGrace = c.CloseGrace
+	}
+	if c.ResumeWindow > 0 {
+		d.ResumeWindow = c.ResumeWindow
+	}
+	if c.ReopenWithin > 0 {
+		d.ReopenWithin = c.ReopenWithin
+	}
+	if c.MaxGap > 0 {
+		d.MaxGap = c.MaxGap
+	}
+	if c.ExcludeApps != nil {
+		d.ExcludeApps = c.ExcludeApps
+	}
+	return d
+}
+
+// Device says how far the tracker can trust what a device reports.
+type Device struct {
+	ID int64
+	// TitleMediaIDs: the media id is the published title (Android TV), so a
+	// new one is new content even without passing through a menu, and coming
+	// back to it within ReopenWithin continues the old session. On webOS the
+	// media id also changes on credits and ads, so it only splits after the
+	// app's menu.
+	TitleMediaIDs bool
+}
+
+// Event is what the tracker did with an observation, for logs and the
+// dashboard's live view.
+type Event struct {
+	Kind    EventKind
+	Session int64
+	Reason  string // why it closed
+	Outcome store.CloseOutcome
+}
+
+// EventKind names a session change.
+type EventKind string
+
+const (
+	Opened  EventKind = "opened"
+	Resumed EventKind = "resumed" // same title came back, or kept after a restart
+	Ended   EventKind = "closed"
+)
+
+// Tracker follows one device. It is not safe for concurrent use: feed it
+// from the one goroutine that reads the device's source.
+type Tracker struct {
+	st  *store.Store
+	dev Device
+	cfg Config
+	log *slog.Logger
+
+	lastAt      time.Time // previous observation
+	prevPlaying bool      // the previous observation was playing
+	idleSince   time.Time // since when no recorded app is in front; zero if one is
+	leftPlayer  bool      // the app is in front but its player is not (menu)
+	hdr         string    // dynamic range playing now
+
+	// OnEvent, if set, is called for every session change.
+	OnEvent func(Event)
+}
+
+// NewTracker starts following a device: open sessions left by a previous run
+// are closed, except the latest when it was seen within ResumeWindow.
+func NewTracker(ctx context.Context, st *store.Store, dev Device, cfg Config, now time.Time, log *slog.Logger) (*Tracker, error) {
+	if log == nil {
+		log = slog.Default()
+	}
+	t := &Tracker{st: st, dev: dev, cfg: cfg.withDefaults(), log: log.With("device", dev.ID)}
+	closed, kept, err := st.Recover(ctx, dev.ID, t.cfg.ResumeWindow, now, t.cfg.MinPlayed, t.appMin)
+	if err != nil {
+		return nil, err
+	}
+	if closed > 0 {
+		t.log.Info("closed sessions left open", "count", closed)
+	}
+	if kept != nil {
+		t.log.Info("session resumed after restart", "session", kept.ID)
+	}
+	return t, nil
+}
+
+func (t *Tracker) appMin(appID string) time.Duration { return t.cfg.MinPlayedByApp[appID] }
+
+func (t *Tracker) emit(e Event) {
+	t.log.Info("session "+string(e.Kind), "session", e.Session, "reason", e.Reason)
+	if t.OnEvent != nil {
+		t.OnEvent(e)
+	}
+}
+
+func (t *Tracker) close(ctx context.Context, s *model.Session, why string) error {
+	out, err := t.st.CloseSession(ctx, s.ID, t.cfg.MinPlayed, t.appMin(s.App.ID))
+	if err != nil {
+		return err
+	}
+	t.prevPlaying, t.leftPlayer = false, false
+	if out != store.NotOpen {
+		t.emit(Event{Kind: Ended, Session: s.ID, Reason: why, Outcome: out})
+	}
+	return nil
+}
+
+// Observe applies one observation and returns the device's open session
+// afterwards (nil if none).
+func (t *Tracker) Observe(ctx context.Context, o model.Observation) (*model.Session, error) {
+	now := o.At
+	var gap time.Duration
+	if !t.lastAt.IsZero() {
+		gap = now.Sub(t.lastAt)
+	}
+	t.lastAt = now
+	sess, err := t.st.OpenSession(ctx, t.dev.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// No recorded app in front: tolerated for a while (app switches, drops).
+	if o.State == model.StateOff || o.App.ID == "" || t.cfg.ExcludeApps[o.App.ID] {
+		t.prevPlaying = false
+		t.leftPlayer = sess != nil // leaving the app also leaves the player
+		if t.idleSince.IsZero() {
+			t.idleSince = now
+		}
+		if sess != nil && now.Sub(t.idleSince) > t.cfg.CloseGrace {
+			return nil, t.close(ctx, sess, "no streaming app")
+		}
+		return sess, nil
+	}
+	t.idleSince = time.Time{}
+
+	playing := o.State == model.StatePlaying
+	if sess != nil && sess.App.ID != o.App.ID {
+		if err := t.close(ctx, sess, "switched to "+o.App.Name); err != nil {
+			return nil, err
+		}
+		sess = nil
+	}
+	// New content in the same app. Only after going back to the menu, unless
+	// the media id is a title: credits, ads and autoplay change webOS's id
+	// without being new content (autoplay has its own split, "next episode").
+	if sess != nil && o.MediaID != "" && o.MediaID != sess.MediaID {
+		if sess.MediaID != "" && (t.leftPlayer || t.dev.TitleMediaIDs) {
+			if err := t.close(ctx, sess, "new content"); err != nil {
+				return nil, err
+			}
+			sess = nil
+		} else if err := t.st.SetMedia(ctx, sess.ID, o.MediaID); err != nil {
+			return nil, err
+		}
+	}
+	if o.MediaID != "" {
+		t.leftPlayer = false
+	} else if sess != nil {
+		t.leftPlayer = true
+	}
+
+	if sess == nil {
+		if !playing {
+			return nil, nil
+		}
+		if t.dev.TitleMediaIDs && o.MediaID != "" {
+			if sess, err = t.st.ReopenRecent(ctx, t.dev.ID, o.App.ID, o.MediaID, t.cfg.ReopenWithin, now); err != nil {
+				return nil, err
+			}
+			if sess != nil {
+				t.emit(Event{Kind: Resumed, Session: sess.ID, Reason: "same title"})
+			}
+		}
+		if sess == nil {
+			if sess, err = t.st.StartSession(ctx, t.dev.ID, o.App, o.MediaID, now); err != nil {
+				return nil, err
+			}
+			t.emit(Event{Kind: Opened, Session: sess.ID})
+		}
+		t.prevPlaying = false // the interval before this one was not playback
+	}
+
+	if o.Hint.Title != "" && sess.Hint.Title == "" {
+		if err := t.st.SetHint(ctx, sess.ID, o.Hint); err != nil {
+			return nil, err
+		}
+	}
+	if o.Position != nil {
+		if err := t.st.SetPosition(ctx, sess.ID, *o.Position); err != nil {
+			return nil, err
+		}
+	}
+	if o.Video != nil {
+		if o.Video.Width > 0 {
+			if err := t.st.SetVideo(ctx, sess.ID, *o.Video); err != nil {
+				return nil, err
+			}
+		}
+		if o.Video.HDR != "" {
+			t.hdr = o.Video.HDR
+		}
+	}
+
+	if playing {
+		var add time.Duration
+		if t.prevPlaying && gap > 0 && gap <= t.cfg.MaxGap {
+			add = gap
+		}
+		if err := t.st.Touch(ctx, sess.ID, now, add, true); err != nil {
+			return nil, err
+		}
+		if add > 0 && t.hdr != "" {
+			if err := t.st.AddHDRTime(ctx, sess.ID, t.hdr, add); err != nil {
+				return nil, err
+			}
+		}
+	} else if now.Sub(sess.LastPlayAt) > t.cfg.PauseTimeout {
+		return nil, t.close(ctx, sess, "inactive")
+	} else if err := t.st.Touch(ctx, sess.ID, now, 0, false); err != nil {
+		return nil, err
+	}
+	t.prevPlaying = playing
+	return t.st.Session(ctx, sess.ID)
+}

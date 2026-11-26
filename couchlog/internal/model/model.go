@@ -113,8 +113,41 @@ type Item struct {
 	SessionID int64
 	Identity
 	Poster           string
-	RuntimeMinutes   int  // from TMDB, 0 if unknown
-	RuntimeEstimated bool // borrowed from another listing
+	RuntimeMinutes   int        // from TMDB, 0 if unknown
+	RuntimeEstimated bool       // borrowed from another listing
+	ReplacedAt       *time.Time // a correction replaced it; nil for current items
+}
+
+// SameTitle reports whether two identities are the same movie or episode,
+// by external ID when both have one, so a correction to the same thing does
+// not take it out of Trakt and send it again.
+func (a Identity) SameTitle(b Identity) bool {
+	if a.Kind != b.Kind || a.Season != b.Season || a.Episode != b.Episode {
+		return false
+	}
+	switch {
+	case a.TMDB != 0 && b.TMDB != 0:
+		return a.TMDB == b.TMDB
+	case a.IMDb != "" && b.IMDb != "":
+		return a.IMDb == b.IMDb
+	case a.TVDB != 0 && b.TVDB != 0:
+		return a.TVDB == b.TVDB
+	}
+	return a.Title == b.Title && a.Year == b.Year
+}
+
+// Alias says that what a device (or Plex) calls MatchTitle is Identity.
+// Season and episode in Identity are ignored: an alias names the movie or the
+// show, and the episode comes from the device or the picker.
+type Alias struct {
+	ID         int64
+	UserID     int64
+	AppID      string // "" = any app
+	MatchTitle string // as the device says it; stored normalized
+	MatchYear  int    // 0 = any year
+	Identity
+	Hits      int
+	CreatedAt time.Time
 }
 
 // DeliveryStatus is where an item stands with one destination.
@@ -127,6 +160,8 @@ const (
 	NotFound DeliveryStatus = "not_found" // the service does not have this title (yet)
 	Skipped  DeliveryStatus = "skipped"   // nothing to do (already marked by other means)
 	Failed   DeliveryStatus = "error"     // the last attempt failed; see Error
+	Remove   DeliveryStatus = "remove"    // a correction replaced it: take it out of your history there
+	Removed  DeliveryStatus = "removed"   // taken out; the replaced item can go once all are
 )
 
 // Delivery is one item's status with one destination ("trakt", "simkl").

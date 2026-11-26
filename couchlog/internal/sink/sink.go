@@ -36,4 +36,9 @@ type Sink interface {
 	// Push adds the entries to your history. Implementations respect the
 	// service's rate limits and Retry-After.
 	Push(ctx context.Context, entries []Entry) ([]Result, error)
+
+	// Remove takes entries out of your history: the plays of an item that a
+	// correction replaced (status Remove). Only the play at WatchedAt goes,
+	// never other viewings of the same title. Success is Removed.
+	Remove(ctx context.Context, entries []Entry) ([]Result, error)
 }

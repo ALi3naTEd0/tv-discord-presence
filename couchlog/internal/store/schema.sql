@@ -62,21 +62,44 @@ CREATE TABLE items (
   imdb              TEXT    NOT NULL DEFAULT '',
   poster            TEXT    NOT NULL DEFAULT '',
   runtime_min       INTEGER,
-  runtime_estimated INTEGER NOT NULL DEFAULT 0
+  runtime_estimated INTEGER NOT NULL DEFAULT 0,
+  replaced_at       INTEGER                      -- set when a correction replaced it; kept until
+                                                 -- every service it reached has removed it
 );
-CREATE INDEX items_session ON items(session_id);
+CREATE INDEX items_session ON items(session_id) WHERE replaced_at IS NULL;
 
 CREATE TABLE deliveries (
   item_id    INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
   sink       TEXT    NOT NULL,                   -- trakt | simkl
   status     TEXT    NOT NULL DEFAULT 'pending'
-             CHECK (status IN ('pending', 'ready', 'added', 'not_found', 'skipped', 'error')),
+             CHECK (status IN ('pending', 'ready', 'added', 'not_found', 'skipped', 'error',
+                               'remove', 'removed')),   -- remove: a correction; take it back out
   error      TEXT    NOT NULL DEFAULT '',
   attempts   INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (item_id, sink)
 );
 CREATE INDEX deliveries_open ON deliveries(sink, status) WHERE status <> 'added';
+
+-- Aliases: "when a device or Plex calls it this, it is that". Couchlog's
+-- answer to trakt-scrobbler's remap_rules.toml, but made from the dashboard
+-- when you correct an identification, and resolved to IDs, never to titles.
+CREATE TABLE aliases (
+  id          INTEGER PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  app_id      TEXT    NOT NULL DEFAULT '',     -- '' = any app; 'plex' for Plex's own (mis)matches
+  match_title TEXT    NOT NULL,                -- normalized: lower case, single spaces
+  match_year  INTEGER NOT NULL DEFAULT 0,      -- 0 = any year
+  kind        TEXT    NOT NULL CHECK (kind IN ('movie', 'episode')),
+  title       TEXT    NOT NULL,
+  year        INTEGER,
+  tmdb        INTEGER,
+  tvdb        INTEGER,
+  imdb        TEXT    NOT NULL DEFAULT '',
+  hits        INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL,
+  UNIQUE (user_id, app_id, match_title, match_year)
+);
 
 CREATE TABLE credentials (
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
