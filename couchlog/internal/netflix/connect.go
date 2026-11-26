@@ -162,7 +162,8 @@ func Connect(ctx context.Context, profileDir, sessionPath string, status func(st
 		status("Connected as " + p.Name)
 		return p, nil
 	}
-	page, ask := "https://www.netflix.com/login", "Sign in to Netflix in the window that opened and pick your profile"
+	page, ask := "https://www.netflix.com/login",
+		"Sign in to Netflix in the window that opened and pick your profile; it closes by itself (up to half a minute)"
 	for round := 0; round < 2; round++ {
 		start := time.Now()
 		win := exec.Command(bin, "--user-data-dir="+profileDir, "--no-first-run", "--no-default-browser-check",
@@ -197,7 +198,7 @@ func Connect(ctx context.Context, profileDir, sessionPath string, status func(st
 			return nil, errors.New("netflix: the window closed before signing in to Netflix; try again")
 		}
 		// Signed in, no profile yet: once more, on the profile picker.
-		page, ask = "https://www.netflix.com/browse", "Pick your Netflix profile in the window"
+		page, ask = "https://www.netflix.com/browse", "Pick your Netflix profile in the window; it closes by itself"
 	}
 	return nil, errors.New("netflix: signed in, but Netflix did not open a profile; try again and pick one")
 }
@@ -252,12 +253,8 @@ func signedIn(ctx context.Context, profileDir string, start time.Time, stop <-ch
 			id, ok := c["NetflixId"]
 			ps, ok2 := c["profilesNewSession"]
 			if ok && ok2 && (id.created.After(start) || ps.created.After(start)) && !ps.accessed.Before(id.created) {
-				// Give the profile page a moment to finish what it sets.
-				select {
-				case <-time.After(4 * time.Second):
-				case <-stop:
-					return
-				}
+				// Chrome writes cookies to disk in batches (about every 30 s),
+				// so by the time they show the profile choice is long done.
 				close(done)
 				return
 			}
