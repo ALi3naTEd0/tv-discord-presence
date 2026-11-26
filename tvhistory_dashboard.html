@@ -105,6 +105,7 @@ button:disabled{opacity:.5;cursor:default}
     <div class="brand"><img src="/static/icon.svg" alt=""><div><h1>Couchlog</h1><div class="sub" id="stats">loading…</div></div></div>
     <div class="actions" style="margin:0"><button id="verify">Check Trakt/Simkl</button>
     <button id="plexImport">Import from Plex</button>
+    <button id="netflix" title="Netflix tells the TV nothing; Couchlog reads your account's viewing activity">Netflix…</button>
     <button class="pri" id="pushAll">Send pending</button></div>
   </header>
   <nav class="filters tabs" id="sources">
@@ -426,6 +427,29 @@ $("#plexImport").addEventListener("click", async e => {
   catch (err) { toast(err.message); }
   b.disabled = false; b.textContent = "Import from Plex"; await refresh();
 });
+// Netflix: connected (and as which profile), or a button that opens Couchlog's own sign-in window
+let netflixTimer = null;
+async function renderNetflix() {
+  const b = $("#netflix");
+  let st;
+  try { st = await api("/api/netflix/status"); } catch { b.style.display = "none"; return; }
+  b.style.display = "";
+  b.disabled = !!st.connecting;
+  b.innerHTML = st.connecting ? `<span class="spin"></span> Sign in, then close the window…`
+    : st.connected ? `Netflix: ${esc(st.profile || "connected")}` : "Connect Netflix";
+  b.title = st.connected ? `Reading your viewing activity (${st.browser_profile || ""}). Click to reconnect.`
+    : (st.reason || "Couchlog opens its own window: sign in, pick your profile and close it");
+  clearTimeout(netflixTimer);
+  if (st.connecting) netflixTimer = setTimeout(renderNetflix, 3000);
+  return st;
+}
+$("#netflix").addEventListener("click", async () => {
+  try { await api("/api/netflix/connect", {}); toast("A Netflix window opened on this computer: sign in, pick your profile, then close it"); }
+  catch (err) { toast(err.message); }
+  renderNetflix();
+});
+renderNetflix();
+
 $("#pushAll").addEventListener("click", async e => {
   const b = e.target; b.disabled = true; b.innerHTML = `<span class="spin"></span> Sending…`;
   try { await summarize(await api("/api/push", {})); } catch (err) { toast(err.message); await refresh(); }

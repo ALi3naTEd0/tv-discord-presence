@@ -15,6 +15,7 @@ import (
 
 	"github.com/ALi3naTEd0/couchlog/internal/compare"
 	"github.com/ALi3naTEd0/couchlog/internal/config"
+	"github.com/ALi3naTEd0/couchlog/internal/netflix"
 	"github.com/ALi3naTEd0/couchlog/internal/server"
 	"github.com/ALi3naTEd0/couchlog/internal/store"
 )
@@ -98,7 +99,9 @@ func serverCmd(ctx context.Context, args []string, stderr io.Writer) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Info("couchlog server", "version", version, "db", dbPath, "devices", len(cfg.Devices), "sinks", cfg.Sinks)
-	return server.New(cfg, st, log).Run(ctx)
+	srv := server.New(cfg, st, log)
+	srv.DataDir = filepath.Dir(dbPath)
+	return srv.Run(ctx)
 }
 
 func compareCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -120,5 +123,47 @@ func compareCmd(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return err
 	}
 	r.Write(stdout, *diff)
+	return nil
+}
+
+func connectCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 || args[0] != "netflix" {
+		return errors.New("usage: couchlog connect netflix [-cookie \"NetflixId=...; SecureNetflixId=...\"]")
+	}
+	fs := flag.NewFlagSet("connect netflix", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cfgPath := fs.String("config", defaultConfig(), "settings file (for where Couchlog keeps its data)")
+	cookie := fs.String("cookie", "", "paste the netflix.com cookies instead of signing in in a window")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	dbPath := defaultDB()
+	if cfg, err := config.Load(*cfgPath); err == nil && cfg.DB != "" {
+		dbPath = cfg.DB
+	}
+	dir := filepath.Dir(dbPath)
+	path := netflix.SessionPath(dir)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if *cookie != "" {
+		cookies := netflix.ParseCookieHeader(*cookie)
+		c := &netflix.Client{Cookies: func() (map[string]string, string, error) { return cookies, "paste", nil }}
+		p, err := c.Profile(ctx)
+		if err != nil {
+			return fmt.Errorf("those cookies do not open a Netflix session: %w", err)
+		}
+		if err := (&netflix.Saved{Cookies: cookies, SavedAt: time.Now(), How: "paste"}).Save(path); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "Connected to Netflix as %s (pasted session, saved in %s)\n", p.Name, path)
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	p, err := netflix.Connect(ctx, filepath.Join(dir, "netflix-browser"), path, func(s string) { fmt.Fprintln(stdout, s) })
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "Saved in %s; Couchlog reads your Netflix activity with it from now on (%s).\n", path, p.Name)
 	return nil
 }

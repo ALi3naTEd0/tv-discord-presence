@@ -33,6 +33,9 @@ type Server struct {
 	Ident *identify.Identifier
 	// PlexEvery is how often Plex's history is imported; 0 = 5 min.
 	PlexEvery time.Duration
+	// DataDir holds what Couchlog keeps next to its database (the saved
+	// Netflix session).
+	DataDir string
 
 	// newSource builds a device's source; tests replace it.
 	newSource func(d config.Device, id int64) source.Source
@@ -99,7 +102,8 @@ func (s *Server) Run(ctx context.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.netflixLoop(ctx, &netflix.Client{})
+			path := netflix.SessionPath(s.DataDir)
+			s.netflixLoop(ctx, &netflix.Client{Cookies: netflix.SessionCookies(path), SessionPath: path})
 		}()
 	}
 	if p := s.Config.Plex; p != nil {

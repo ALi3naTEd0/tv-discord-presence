@@ -246,14 +246,20 @@ password, no separate app):
 1. **Automatic:** a readable browser on the same machine already has it
    (Firefox family: plain cookie store; Chromium on Linux/macOS; not
    Chrome/Edge on Windows, which use App-Bound Encryption).
-2. **Connect Netflix** from any PC running `couchlog` (agent mode): it
-   opens an installed Chrome, Edge, Brave or Firefox with an empty profile
-   of its own and a debugging port, you sign in once, and Couchlog reads
-   that window's cookies (HttpOnly included) through the browser's
-   debugging protocol (CDP / WebDriver BiDi, over the WebSocket library
-   the webOS source already uses), then hands them to the home server over
-   the agent's token. The server owns the session from then on; the
-   dashboard says "reconnect" when Netflix invalidates it.
+2. **Connect Netflix** (`couchlog connect netflix`, also a dashboard
+   button): an installed Chrome, Edge, Brave or Chromium opens with an
+   empty profile of Couchlog's own, as a plain window with nothing
+   watching or driving it. You sign in, pick your profile and close it;
+   only then is the same profile opened again with no window and no page,
+   and the browser itself hands over its netflix.com cookies (CDP
+   `Storage.getCookies`), which also works where the cookie file is
+   encrypted (Windows). Watching the sign-in through the debugging port
+   does not work: the browser then reports itself as automated and
+   Netflix refuses the sign-in, and hiding that would be evading its bot
+   detection, which Couchlog does not do. The session is saved (0600)
+   next to the database, renewed cookies are written back, and it is the
+   first source from then on. `-cookie "NetflixId=…; …"` saves a pasted
+   session instead.
 3. **No PC:** paste the cookie in the dashboard. Later, optionally: a
    headless browser on the server shown inside the dashboard, so even a
    phone can sign in (a separate image: Chromium is ~300 MB).

@@ -1518,9 +1518,19 @@ def firefox_cookie_dbs() -> list[Path]:
     return [p for r in roots if r.is_dir() for p in r.glob("*/cookies.sqlite")]
 
 
+COUCHLOG_NETFLIX = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "couchlog" / "netflix-session.json"
+
+
 def netflix_cookies() -> tuple[dict, str]:
-    """(netflix.com cookies, where they came from) from the profile that used Netflix last.
-    The browser keeps the database locked, so a snapshot is read (with its WAL)."""
+    """(netflix.com cookies, where they came from): the session Couchlog saved with "Connect
+    Netflix" first, else the browser profile that used Netflix last (a snapshot of its cookie
+    store, which the browser keeps locked)."""
+    try:
+        saved = json.loads(COUCHLOG_NETFLIX.read_text())
+        if saved.get("cookies", {}).get("NetflixId"):
+            return saved["cookies"], f"couchlog ({saved.get('how', 'connect')})"
+    except (OSError, ValueError):
+        pass
     import shutil
     import tempfile
     best, best_at, src = None, 0, ""
@@ -1555,8 +1565,14 @@ def netflix_http(url: str, data: bytes | None = None, headers: dict | None = Non
     if data is not None:
         h.setdefault("Content-Type", "application/x-www-form-urlencoded")
     req = urllib.request.Request(url, data=data, headers=h, method="POST" if data is not None else "GET")
-    with urllib.request.urlopen(req, timeout=25) as r:
-        return r.read().decode("utf-8", "replace")
+    import http.client
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=25) as r:
+                return r.read().decode("utf-8", "replace")
+        except http.client.IncompleteRead as e:   # Netflix sometimes cuts a long page short: retry
+            if attempt == 2:
+                return e.partial.decode("utf-8", "replace")
 
 
 def _js_unescape(v: str) -> str:
@@ -1570,8 +1586,11 @@ def netflix_profile() -> dict:
     def fetch():
         html = netflix_http(f"{NETFLIX}/settings/viewed/")
         grab = lambda rx: (m.group(1) if (m := re.search(rx, html)) else None)
-        prof = {"auth_url": grab(r'"authURL":"(.*?)"'), "guid": grab(r'"userInfo":\{"data":\{[^}]*"userGuid":"(.*?)"'),
-                "name": grab(r'"userInfo":\{"data":\{"name":"(.*?)"'), "build": grab(r'"BUILD_IDENTIFIER":"(.*?)"')}
+        # Netflix serves two variants of this page: the profile is under userInfo or auiUserContext
+        prof = {"auth_url": grab(r'"authURL":"(.*?)"'),
+                "guid": grab(r'"(?:userInfo|auiUserContext)":\{"data":\{[^}]*?"userGuid":"(.*?)"'),
+                "name": grab(r'"(?:userInfo|auiUserContext)":\{"data":\{"name":"(.*?)"'),
+                "build": grab(r'"BUILD_IDENTIFIER":"(.*?)"')}
         prof = {k: _js_unescape(v) if v else v for k, v in prof.items()}
         if not prof["auth_url"] or not prof["guid"]:
             raise RuntimeError("Netflix session expired or no profile selected: open netflix.com in the browser")
@@ -1693,7 +1712,56 @@ def netflix_identify(force: bool = False) -> int:
     return done
 
 
+NETFLIX_CONNECT = {"proc": None, "lines": [], "error": None}
+
+
+def couchlog_bin() -> str | None:
+    import shutil
+    return shutil.which("couchlog") or next((str(p) for p in [Path.home() / ".local/bin/couchlog"] if p.exists()), None)
+
+
+def netflix_connect() -> dict:
+    """Run `couchlog connect netflix`: Couchlog opens its own browser window on this computer's
+    screen; when you sign in, it saves the session (couchlog keeps renewing it)."""
+    import subprocess
+    p = NETFLIX_CONNECT["proc"]
+    if p and p.poll() is None:
+        return {"ok": True, "running": True}
+    exe = couchlog_bin()
+    if not exe:
+        raise ValueError("couchlog is not installed on this computer")
+    env = dict(os.environ)
+    try:   # a service may have started before the graphical session: borrow its display
+        for line in subprocess.run(["systemctl", "--user", "show-environment"], capture_output=True, text=True,
+                                   timeout=5).stdout.splitlines():
+            k, _, v = line.partition("=")
+            if k in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS") and not env.get(k):
+                env[k] = v
+    except Exception:
+        pass
+    proc = subprocess.Popen([exe, "connect", "netflix"], env=env, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True)
+    NETFLIX_CONNECT.update(proc=proc, lines=[], error=None)
+
+    def follow():
+        for line in proc.stdout:
+            NETFLIX_CONNECT["lines"].append(line.strip())
+        if proc.wait() != 0:
+            NETFLIX_CONNECT["error"] = (NETFLIX_CONNECT["lines"] or ["couchlog connect failed"])[-1]
+        _cache.pop(("netflix_profile",), None)
+        _cache.pop(("netflix_cookies",), None)
+    threading.Thread(target=follow, name="netflix-connect", daemon=True).start()
+    return {"ok": True, "running": True}
+
+
 def netflix_status() -> dict:
+    p = NETFLIX_CONNECT["proc"]
+    if p and p.poll() is None:
+        return {"connected": False, "connecting": True,
+                "reason": (NETFLIX_CONNECT["lines"] or ["Opening the sign-in window…"])[-1]}
+    if NETFLIX_CONNECT["error"]:
+        err, NETFLIX_CONNECT["error"] = NETFLIX_CONNECT["error"], None
+        return {"connected": False, "reason": err}
     try:
         _, src = netflix_cookies()
     except Exception as e:
@@ -2061,6 +2129,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(400, {"error": "Invalid JSON"})
         path = urllib.parse.urlparse(self.path).path
         try:
+            if path == "/api/netflix/connect":
+                return self.send(200, netflix_connect())
             if path == "/api/push":
                 return self.send(200, api_push(body))
             if path == "/api/verify":

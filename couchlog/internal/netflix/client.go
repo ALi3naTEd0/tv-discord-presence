@@ -18,8 +18,11 @@ import (
 type Client struct {
 	// Cookies returns the session's netflix.com cookies; nil = BrowserCookies.
 	Cookies func() (map[string]string, string, error)
-	BaseURL string // "" = https://www.netflix.com (tests override)
-	HTTP    *http.Client
+	// SessionPath, when the cookies came from Couchlog's saved session,
+	// is updated with the cookies Netflix renews, so the session lasts.
+	SessionPath string
+	BaseURL     string // "" = https://www.netflix.com (tests override)
+	HTTP        *http.Client
 
 	mu      sync.Mutex
 	profile *Profile
@@ -78,7 +81,7 @@ func (c *Client) do(ctx context.Context, method, u, body string, headers map[str
 	if get == nil {
 		get = BrowserCookies
 	}
-	cookies, _, err := get()
+	cookies, src, err := get()
 	if err != nil {
 		return nil, err
 	}
@@ -108,6 +111,9 @@ func (c *Client) do(ctx context.Context, method, u, body string, headers map[str
 		return nil, fmt.Errorf("netflix: %w", err)
 	}
 	defer resp.Body.Close()
+	if c.SessionPath != "" && strings.HasPrefix(src, "couchlog") {
+		c.keepRenewed(resp.Cookies())
+	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if err != nil {
 		return nil, err
@@ -120,10 +126,12 @@ func (c *Client) do(ctx context.Context, method, u, body string, headers map[str
 
 var (
 	reAuthURL = regexp.MustCompile(`"authURL":"(.*?)"`)
-	reGUID    = regexp.MustCompile(`"userInfo":\{"data":\{[^}]*"userGuid":"(.*?)"`)
-	reName    = regexp.MustCompile(`"userInfo":\{"data":\{"name":"(.*?)"`)
-	reBuild   = regexp.MustCompile(`"BUILD_IDENTIFIER":"(.*?)"`)
-	reJSHex   = regexp.MustCompile(`\\x([0-9A-Fa-f]{2})|\\u([0-9A-Fa-f]{4})`)
+	// Netflix serves two variants of the page: the profile is under
+	// userInfo or auiUserContext.
+	reGUID  = regexp.MustCompile(`"(?:userInfo|auiUserContext)":\{"data":\{[^}]*?"userGuid":"(.*?)"`)
+	reName  = regexp.MustCompile(`"(?:userInfo|auiUserContext)":\{"data":\{"name":"(.*?)"`)
+	reBuild = regexp.MustCompile(`"BUILD_IDENTIFIER":"(.*?)"`)
+	reJSHex = regexp.MustCompile(`\\x([0-9A-Fa-f]{2})|\\u([0-9A-Fa-f]{4})`)
 )
 
 // jsUnescape decodes the escapes of a JavaScript string literal in the page.
@@ -249,4 +257,33 @@ func (c *Client) Metadata(ctx context.Context, id int64) (*Video, error) {
 	c.meta[id] = v
 	c.mu.Unlock()
 	return v, nil
+}
+
+// keepRenewed stores the session cookies Netflix sends back renewed.
+func (c *Client) keepRenewed(renewed []*http.Cookie) {
+	var changed []*http.Cookie
+	for _, k := range renewed {
+		if (k.Name == "NetflixId" || k.Name == "SecureNetflixId") && k.Value != "" && k.MaxAge >= 0 {
+			changed = append(changed, k)
+		}
+	}
+	if len(changed) == 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	s, err := LoadSaved(c.SessionPath)
+	if err != nil {
+		return
+	}
+	dirty := false
+	for _, k := range changed {
+		if s.Cookies[k.Name] != k.Value {
+			s.Cookies[k.Name], dirty = k.Value, true
+		}
+	}
+	if dirty {
+		s.SavedAt = time.Now()
+		s.Save(c.SessionPath)
+	}
 }
