@@ -297,8 +297,19 @@ setup wizard when it finds one):
 - read-only on the old file; running it twice imports nothing new
   (`source_key` and a stable mapping of old ids)
 
-Parallel run: both versions record the same TVs for a week; a comparison
-command lists sessions that differ in start, end, played time or split.
+Parallel run: both versions record the same TVs for a week, each in its own
+database, Couchlog sending nothing (no sinks):
+
+```
+couchlog init --from-tvpresence     # same TV, box, keys and Plex; no new pairing
+systemctl --user enable --now couchlog
+couchlog compare -since 24h -diff   # Go vs tvpresence, session by session
+```
+
+`compare` matches TV sessions by device, app and a start within 2 min (only
+from when Couchlog started listening) and Plex plays by source key, and flags
+played time off by more than 30 s (2 min for Plex runtimes), hidden-as-short,
+open/closed and identification differences.
 
 ## Distribution
 

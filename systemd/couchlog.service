@@ -1,0 +1,12 @@
+[Unit]
+Description=Couchlog (TV watch history; Go version)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/couchlog server
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,192 @@
+// Package config reads Couchlog's settings file (TOML). Secrets never live
+// in it: the TMDB key and the Plex token come from the environment
+// (COUCHLOG_TMDB_KEY / COUCHLOG_PLEX_TOKEN, or tvpresence's TMDB_API_KEY /
+// PLEX_TOKEN), so the file can be shared or committed.
+package config
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/BurntSushi/toml"
+)
+
+// Device is one TV or box to listen to.
+type Device struct {
+	Kind    string `toml:"kind"`     // webos | androidtv
+	Name    string `toml:"name"`     // shown in the dashboard; also the device's identity in the database
+	Host    string `toml:"host"`     // IP or name; androidtv may add :port
+	KeyFile string `toml:"key_file"` // pairing key (webOS client key, adb private key)
+}
+
+// Plex is the Plex server to import from.
+type Plex struct {
+	URL        string `toml:"url"`
+	Account    int    `toml:"account"`     // 1 = the server owner
+	User       string `toml:"user"`        // optional account name (shared servers)
+	DB         string `toml:"db"`          // Plex's library database; "" = the OS default when readable
+	ImportDays int    `toml:"import_days"` // look-back on the first import
+}
+
+// Config is the whole file.
+type Config struct {
+	DB       string   `toml:"db"` // Couchlog's database; "" = the default
+	Devices  []Device `toml:"device"`
+	Plex     *Plex    `toml:"plex"`
+	Language string   `toml:"language"` // TMDB language, e.g. "es-MX"
+	// Sinks are the services identified titles are sent to ("trakt",
+	// "simkl"). Empty: Couchlog only records (the parallel run).
+	Sinks []string `toml:"sinks"`
+	// EnvFiles are extra KEY=value files read for secrets when the
+	// environment does not have them (tvpresence's .env works).
+	EnvFiles []string `toml:"env_files"`
+}
+
+// Load reads a settings file.
+func Load(path string) (*Config, error) {
+	var c Config
+	if _, err := toml.DecodeFile(path, &c); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	for i := range c.Devices {
+		d := &c.Devices[i]
+		d.KeyFile = Expand(d.KeyFile)
+		if d.Kind != "webos" && d.Kind != "androidtv" {
+			return nil, fmt.Errorf("config: device %q: kind must be webos or androidtv, not %q", d.Name, d.Kind)
+		}
+		if d.Host == "" || d.Name == "" {
+			return nil, fmt.Errorf("config: every device needs a name and a host")
+		}
+	}
+	for i, f := range c.EnvFiles {
+		c.EnvFiles[i] = Expand(f)
+	}
+	c.DB = Expand(c.DB)
+	if c.Plex != nil {
+		c.Plex.DB = Expand(c.Plex.DB)
+		if c.Plex.Account == 0 {
+			c.Plex.Account = 1
+		}
+		if c.Plex.ImportDays == 0 {
+			c.Plex.ImportDays = 7
+		}
+	}
+	return &c, nil
+}
+
+// Save writes a settings file, creating its folder.
+func (c *Config) Save(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fmt.Fprintln(f, "# Couchlog settings. Secrets (TMDB key, Plex token) come from the environment or env_files.")
+	return toml.NewEncoder(f).Encode(c)
+}
+
+// Expand turns a leading ~ into the home folder.
+func Expand(p string) string {
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, strings.TrimPrefix(p, "~"))
+	}
+	return p
+}
+
+// Secret returns the first of names set in the environment, else in the
+// env files.
+func (c *Config) Secret(names ...string) string {
+	for _, n := range names {
+		if v := os.Getenv(n); v != "" {
+			return v
+		}
+	}
+	for _, f := range c.EnvFiles {
+		vals := readEnv(f)
+		for _, n := range names {
+			if v := vals[n]; v != "" {
+				return v
+			}
+		}
+	}
+	return ""
+}
+
+func readEnv(path string) map[string]string {
+	out := map[string]string{}
+	f, err := os.Open(path)
+	if err != nil {
+		return out
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		if !ok {
+			continue
+		}
+		out[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+	}
+	return out
+}
+
+// FromTvpresence builds Couchlog settings from a tvpresence config.toml:
+// the same TV, box and keys (no new pairing), Plex on this machine, and
+// tvpresence's env files for the secrets. Nothing is sent anywhere (no
+// sinks) until you add them.
+func FromTvpresence(path string) (*Config, error) {
+	var old struct {
+		TVHost    string `toml:"tv_host"`
+		AndroidTV struct {
+			Host string `toml:"host"`
+			Port int    `toml:"port"`
+		} `toml:"androidtv"`
+		History struct {
+			EnvFiles []string `toml:"env_files"`
+			PlexURL  string   `toml:"plex_url"`
+			PlexAcct int      `toml:"plex_account_id"`
+			PlexUser string   `toml:"plex_user"`
+			PlexDB   string   `toml:"plex_db"`
+			PlexDays int      `toml:"plex_import_days"`
+			TMDBLang string   `toml:"tmdb_language"`
+			Plex     *bool    `toml:"plex"`
+		} `toml:"history"`
+	}
+	if _, err := toml.DecodeFile(path, &old); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+	dir := filepath.Dir(path)
+	c := &Config{EnvFiles: old.History.EnvFiles, Language: old.History.TMDBLang}
+	if old.TVHost != "" {
+		c.Devices = append(c.Devices, Device{Kind: "webos", Name: "LG TV", Host: old.TVHost, KeyFile: filepath.Join(dir, "key")})
+	}
+	if h := old.AndroidTV.Host; h != "" {
+		if old.AndroidTV.Port != 0 && old.AndroidTV.Port != 5555 {
+			h = fmt.Sprintf("%s:%d", h, old.AndroidTV.Port)
+		}
+		c.Devices = append(c.Devices, Device{Kind: "androidtv", Name: "Android TV", Host: h, KeyFile: filepath.Join(dir, "adbkey")})
+	}
+	c.EnvFiles = append(c.EnvFiles, filepath.Join(dir, ".env"))
+	url := old.History.PlexURL
+	if url == "" {
+		url = "http://127.0.0.1:32400"
+	}
+	c.Plex = &Plex{URL: url, Account: max(old.History.PlexAcct, 1), User: old.History.PlexUser,
+		DB: old.History.PlexDB, ImportDays: max(old.History.PlexDays, 7)}
+	if len(c.Devices) == 0 {
+		return nil, errors.New("config: no TV or box in " + path)
+	}
+	return c, nil
+}

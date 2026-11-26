@@ -1,7 +1,9 @@
-// Command couchlog is your own TV watch history. Stage 2 (design): only the
-// import works so far; server and agent come next.
+// Command couchlog is your own TV watch history.
 //
-//	couchlog import [-db path] [history.db]   bring in a tvpresence history
+//	couchlog init --from-tvpresence [config.toml]   settings from tvpresence's (same TV, box, keys)
+//	couchlog server [-config path]                  listen to the TVs, import Plex
+//	couchlog compare [-since 24h] [-diff]           Go vs tvpresence, session by session
+//	couchlog import [-db path] [history.db]         bring in a tvpresence history
 package main
 
 import (
@@ -27,7 +29,7 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: couchlog import [-db path] [history.db] | couchlog version")
+		return errors.New("usage: couchlog init | server | compare | import | version")
 	}
 	switch args[0] {
 	case "version":
@@ -35,6 +37,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return nil
 	case "import":
 		return importCmd(ctx, args[1:], stdout, stderr)
+	case "init":
+		return initCmd(args[1:], stdout, stderr)
+	case "server":
+		return serverCmd(ctx, args[1:], stderr)
+	case "compare":
+		return compareCmd(ctx, args[1:], stdout, stderr)
 	}
 	return fmt.Errorf("unknown command %q", args[0])
 }
