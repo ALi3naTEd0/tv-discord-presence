@@ -435,16 +435,16 @@ async function renderNetflix() {
   try { st = await api("/api/netflix/status"); } catch { b.style.display = "none"; return; }
   b.style.display = "";
   b.disabled = !!st.connecting;
-  b.innerHTML = st.connecting ? `<span class="spin"></span> Sign in, then close the window…`
+  b.innerHTML = st.connecting ? `<span class="spin"></span> ${esc(st.reason || "Connecting…")}`
     : st.connected ? `Netflix: ${esc(st.profile || "connected")}` : "Connect Netflix";
   b.title = st.connected ? `Reading your viewing activity (${st.browser_profile || ""}). Click to reconnect.`
-    : (st.reason || "Couchlog opens its own window: sign in, pick your profile and close it");
+    : (st.reason || "Sign in once in a Netflix window; Couchlog does the rest");
   clearTimeout(netflixTimer);
   if (st.connecting) netflixTimer = setTimeout(renderNetflix, 3000);
   return st;
 }
 $("#netflix").addEventListener("click", async () => {
-  try { await api("/api/netflix/connect", {}); toast("A Netflix window opened on this computer: sign in, pick your profile, then close it"); }
+  try { await api("/api/netflix/connect", {}); toast("Connecting Netflix… if a window opens on this computer, sign in and pick your profile"); }
   catch (err) { toast(err.message); }
   renderNetflix();
 });

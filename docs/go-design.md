@@ -249,8 +249,12 @@ password, no separate app):
 2. **Connect Netflix** (`couchlog connect netflix`, also a dashboard
    button): an installed Chrome, Edge, Brave or Chromium opens with an
    empty profile of Couchlog's own, as a plain window with nothing
-   watching or driving it. You sign in, pick your profile and close it;
-   only then is the same profile opened again with no window and no page,
+   watching or driving it. If that profile is still signed in, no window
+   opens at all. Chrome keeps cookie names and times unencrypted on disk,
+   so Couchlog sees the sign-in (NetflixId) and the profile choice
+   (profilesNewSession) and closes the window itself (where the store is
+   locked, as on Windows, closing it yourself continues). Then the same
+   profile is opened again with no window and no page,
    and the browser itself hands over its netflix.com cookies (CDP
    `Storage.getCookies`), which also works where the cookie file is
    encrypted (Windows). Watching the sign-in through the debugging port
