@@ -193,7 +193,8 @@ func currentItems(ctx context.Context, tx *sql.Tx, sessionID int64) ([]model.Ite
 func NormalizeTitle(t string) string {
 	var b strings.Builder
 	space := false
-	for _, r := range norm.NFD.String(t) {
+	// "&" and "and" are the same title ("Laurie & Jessie" / "Laurie and Jessie").
+	for _, r := range norm.NFD.String(strings.ReplaceAll(t, "&", " and ")) {
 		switch {
 		case unicode.Is(unicode.Mn, r): // combining accent
 		case unicode.IsLetter(r) || unicode.IsDigit(r):
@@ -307,4 +308,38 @@ func (s *Store) ItemsWithoutPoster(ctx context.Context, since time.Time) ([]mode
 // SetPoster sets an item's poster if it still has none.
 func (s *Store) SetPoster(ctx context.Context, itemID int64, poster string) error {
 	return s.exec(ctx, "UPDATE items SET poster = ? WHERE id = ? AND poster = ''", poster, itemID)
+}
+
+// LastEpisode is the furthest episode of a show (by TMDB id) in your
+// history, for guessing what comes next.
+func (s *Store) LastEpisode(ctx context.Context, userID int64, tmdb int) (season, episode int, ok bool, err error) {
+	err = s.db.QueryRowContext(ctx, `SELECT i.season, i.episode FROM items i JOIN sessions s ON s.id = i.session_id
+		WHERE s.user_id = ? AND i.tmdb = ? AND i.kind = 'episode' AND i.replaced_at IS NULL AND s.hidden <> 'ignored'
+		ORDER BY i.season DESC, i.episode DESC LIMIT 1`, userID, tmdb).Scan(&season, &episode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("store: %w", err)
+	}
+	return season, episode, true, nil
+}
+
+// RecentShow is the show of the latest identified episode watched in an
+// app since a time, or nil.
+func (s *Store) RecentShow(ctx context.Context, userID int64, appID string, since time.Time) (*model.Identity, error) {
+	var id model.Identity
+	var year, tvdb sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT i.title, i.year, i.tmdb, i.tvdb, i.imdb FROM items i JOIN sessions s ON s.id = i.session_id
+		WHERE s.user_id = ? AND s.app_id = ? AND i.kind = 'episode' AND i.replaced_at IS NULL AND i.tmdb IS NOT NULL
+		AND s.started_at > ? ORDER BY s.started_at DESC, i.id DESC LIMIT 1`, userID, appID, ms(since)).
+		Scan(&id.Title, &year, &id.TMDB, &tvdb, &id.IMDb)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	id.Kind, id.Year, id.TVDB = model.KindEpisode, int(year.Int64), int(tvdb.Int64)
+	return &id, nil
 }

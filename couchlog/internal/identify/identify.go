@@ -18,7 +18,6 @@ import (
 	"strings"
 
 	"github.com/ALi3naTEd0/couchlog/internal/model"
-	"github.com/ALi3naTEd0/couchlog/internal/store"
 )
 
 // Catalog is where titles come from. *TMDB is the real one.
@@ -48,6 +47,8 @@ type Identifier struct {
 	NoGuessApps map[string]bool // nil = DefaultNoGuessApps
 	// Posters fills posters TMDB lacks (new titles); nil = TMDB only.
 	Posters *IMDb
+	// History lets Auto continue the show you were watching; nil = off.
+	History History
 }
 
 // ErrNeedsEpisode means a show was picked without saying which episode.
@@ -57,9 +58,15 @@ var ErrNeedsEpisode = errors.New("identify: a show needs a season and an episode
 type Method string
 
 const (
-	ByAlias Method = "alias" // the user said so before
-	ByMatch Method = "match" // the only exact title match on TMDB
+	ByAlias        Method = "alias"        // the user said so before
+	ByMatch        Method = "match"        // the only exact title match on TMDB (and episode, by number or name)
+	ByContinuation Method = "continuation" // the show you were watching in this app, episode confirmed by name
+	ByProgress     Method = "progress"     // the episode is a guess (next after your last one): confirm before sending
 )
+
+// Guessed reports whether the item is a guess the user should confirm
+// before it is sent anywhere.
+func (m Method) Guessed() bool { return m == ByProgress }
 
 // Ref is an ID or link pasted into the search box.
 type Ref struct {
@@ -165,72 +172,6 @@ func (id *Identifier) Item(ctx context.Context, k Kind, tmdbID, season, episode 
 		it.RuntimeEstimated = false
 	}
 	return it, nil
-}
-
-// Auto identifies a session from what its device published, when that is
-// certain enough to send without asking: an alias, or exactly one TMDB title
-// whose name is the published one. It returns nil when it cannot.
-func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) (*model.Item, Method, error) {
-	h := s.Hint
-	if strings.TrimSpace(h.Title) == "" {
-		return nil, "", nil
-	}
-	episode := h.Season > 0 || h.Episode > 0
-	if id.Aliases != nil {
-		a, err := id.Aliases.FindAlias(ctx, userID, s.App.ID, h.Title, 0)
-		if err != nil {
-			return nil, "", err
-		}
-		if a != nil && a.TMDB != 0 {
-			k := Movie
-			if a.Kind == model.KindEpisode {
-				k = Show
-			}
-			it, err := id.Item(ctx, k, a.TMDB, h.Season, h.Episode)
-			if errors.Is(err, ErrNeedsEpisode) {
-				return nil, "", nil
-			}
-			if err != nil {
-				return nil, "", err
-			}
-			return &it, ByAlias, nil
-		}
-	}
-	noGuess := id.NoGuessApps
-	if noGuess == nil {
-		noGuess = DefaultNoGuessApps
-	}
-	if noGuess[s.App.ID] {
-		return nil, "", nil
-	}
-	found, err := id.Catalog.Search(ctx, h.Title)
-	if err != nil {
-		return nil, "", err
-	}
-	want := store.NormalizeTitle(h.Title)
-	var match *Title
-	for i, t := range found {
-		// Episode numbers mean a show; none means a movie (a show without
-		// them cannot become an item anyway).
-		if (t.Kind == Show) != episode {
-			continue
-		}
-		if store.NormalizeTitle(t.Title) != want && store.NormalizeTitle(t.OriginalTitle) != want {
-			continue
-		}
-		if match != nil {
-			return nil, "", nil // two with that name (a remake): ask
-		}
-		match = &found[i]
-	}
-	if match == nil {
-		return nil, "", nil
-	}
-	it, err := id.Item(ctx, match.Kind, match.TMDB, h.Season, h.Episode)
-	if err != nil {
-		return nil, "", err
-	}
-	return &it, ByMatch, nil
 }
 
 // Next returns the episode after cur: the next number in its season, or the

@@ -125,7 +125,8 @@ def connect(path: Path = DB_PATH) -> sqlite3.Connection:
                 pass  # the other process added it
     icols = {r[1] for r in conn.execute("PRAGMA table_info(items)")}
     for col, decl in (("runtime", "INTEGER"),                       # minutes, from TMDB
-                      ("runtime_est", "INTEGER NOT NULL DEFAULT 0")):  # 1 = borrowed from another listing
+                      ("runtime_est", "INTEGER NOT NULL DEFAULT 0"),   # 1 = borrowed from another listing
+                      ("auto_how", "TEXT")):  # identified automatically: alias|match|continuation|progress (guess); NULL = by you
         if col not in icols:
             try:
                 conn.execute(f"ALTER TABLE items ADD COLUMN {col} {decl}")

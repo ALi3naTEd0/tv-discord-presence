@@ -43,7 +43,7 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) *Server {
 	s := &Server{Config: cfg, Store: st, Log: log}
 	if key := cfg.Secret("COUCHLOG_TMDB_KEY", "TMDB_API_KEY"); key != "" {
 		s.Ident = &identify.Identifier{Catalog: &identify.TMDB{Key: key, Language: cfg.Language}, Aliases: st,
-			Posters: &identify.IMDb{}}
+			Posters: &identify.IMDb{}, History: st}
 	} else {
 		log.Warn("no TMDB key (COUCHLOG_TMDB_KEY): sessions are recorded but not identified")
 	}
@@ -169,7 +169,11 @@ func (s *Server) autoIdentify(ctx context.Context, sess *model.Session) {
 	if it == nil {
 		return
 	}
-	if err := s.Store.Identify(ctx, sess.ID, []model.Item{*it}, s.Config.Sinks, time.Now()); err != nil {
+	sinks := s.Config.Sinks
+	if how.Guessed() {
+		sinks = nil // a guessed episode waits for you to confirm it before going anywhere
+	}
+	if err := s.Store.Identify(ctx, sess.ID, []model.Item{*it}, sinks, time.Now()); err != nil {
 		s.Log.Error("identify", "session", sess.ID, "err", err)
 		return
 	}

@@ -192,6 +192,7 @@ func TestNormalizeTitle(t *testing.T) {
 		"Argentina — Campeones":  "argentina campeones",
 		"WALL·E":                 "wall e",
 		"Amélie":                 "amelie",
+		"Laurie & Jessie":        "laurie and jessie",
 		"":                       "",
 	} {
 		if got := NormalizeTitle(in); got != want {

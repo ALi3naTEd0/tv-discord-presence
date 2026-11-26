@@ -259,7 +259,7 @@ def search_imdb(q: str) -> list[dict]:
 
 
 def _norm_title(s: str | None) -> str:
-    s = unicodedata.normalize("NFD", (s or "").lower())
+    s = unicodedata.normalize("NFD", (s or "").lower().replace("&", " and "))
     s = "".join(c for c in s if not unicodedata.combining(c))
     return " ".join(re.sub(r"[^\w]+", " ", s).split())
 
@@ -1210,6 +1210,8 @@ def auto_push() -> None:
     ready = []
     for sess in rows:
         items = conn.execute("SELECT * FROM items WHERE session_id=?", (sess["id"],)).fetchall()
+        if any(it["auto_how"] == "progress" for it in items):
+            continue   # a guessed episode waits for you to confirm it
         if sess["source"] != "plex":
             if any(it["runtime_est"] for it in items):
                 note = "Runtime is only an estimate from TMDB: not sent automatically. Send it if you finished it"
@@ -1246,6 +1248,10 @@ def auto_push() -> None:
 
 def auto_loop() -> None:
     while True:
+        try:
+            auto_identify()
+        except Exception as e:
+            print(f"Auto-identify: {e}", flush=True)
         try:
             n = fill_posters()
             if n:
@@ -1481,6 +1487,167 @@ def api_identify(sid: int, b: dict) -> dict:
         raise
     fill_runtimes(sid)   # lets Discord show a progress bar and auto-send check the watched share
     return {"ok": True, "items": len(rows)}
+
+
+# ------------------------------------------------------- automatic identification
+# The same rules as Couchlog's identify.Auto (Go): only what is certain is identified without
+# asking, because a wrong guess reaches Trakt. What each app publishes on Android TV:
+#   HBO Max:  title = episode name, subtitle = show          ("The Rise of Top G" / "Andrew Tate: Toxic Empire")
+#   Tubi:     "S02:E21 - Lauren", no show name                (the show you were watching in Tubi)
+#   YouTube:  video names; only its own film store counts     (subtitle "Películas y series de YouTube")
+#   Netflix:  nothing
+EP_REF = re.compile(r"(?i)(?:\b[st](\d{1,2})\s*[:.\-]?\s*e(?:p|pisode|pisodio)?\.?\s*(\d{1,3})\b|"
+                    r"\b(?:season|temporada)\s*(\d{1,2})\s*[:,.\-]?\s*(?:episode|episodio|capítulo|cap\.?|ep\.?)\s*(\d{1,3})\b|"
+                    r"\b(\d{1,2})x(\d{2,3})\b)")
+EP_PLACEHOLDER = re.compile(r"(?i)^\s*(?:episode|episodio|capítulo|chapter|ep\.?)\s*\d+\s*$|^\s*(?:tba|tbd)?\s*$")
+YT_MOVIE_CHANNELS = {"películas y series de youtube", "youtube movies", "youtube movies & tv",
+                     "youtube movies and tv", "filmes e séries do youtube"}
+NO_GUESS_APPS = {"com.google.android.youtube.tv", "youtube.leanback.v4"}
+AUTO_TRIED: dict = {}   # (session id, hint) -> last attempt
+
+
+def parse_episode_ref(s: str | None):
+    """(season, episode, rest of the text) from "S02:E21 - Lauren", "Season 1: Episode 2", "1x02"…, or None."""
+    m = EP_REF.search(s or "")
+    if not m:
+        return None
+    g = [int(x) if x else None for x in m.groups()]
+    season, episode = next((g[i], g[i + 1]) for i in (0, 2, 4) if g[i] is not None)
+    rest = (s[:m.start()] + " " + s[m.end():]).strip(" -–—:|·,.")
+    return season, episode, " ".join(rest.split())
+
+
+def tmdb_unique(name: str, kind: str) -> dict | None:
+    """The only TMDB movie/tv whose name or original name is exactly `name`; None if none or several."""
+    if not name:
+        return None
+    want, hits = _norm_title(name), []
+    for r in tmdb("/search/multi", query=name, include_adult="false").get("results", []):
+        if r.get("media_type") != kind:
+            continue
+        names = {_norm_title(r.get(k)) for k in ("title", "name", "original_title", "original_name")}
+        if want in names:
+            hits.append(r)
+    return hits[0] if len(hits) == 1 else None
+
+
+def episode_by_name(show_id: int, name: str):
+    """(season, episode) whose name is `name` (TMDB + TVmaze), "placeholders" when the show lists
+    no names yet ("Episode 1", "TBA": a brand-new series), else None."""
+    want, found, placeholders = _norm_title(name), [], True
+    for sz in show_episodes(show_id)["seasons"]:
+        for e in sz["episodes"]:
+            if not EP_PLACEHOLDER.match(e.get("name") or ""):
+                placeholders = False
+            if want and _norm_title(e.get("name")) == want:
+                found.append((sz["number"], e["number"]))
+    if len(found) == 1:
+        return found[0]
+    return "placeholders" if not found and placeholders else None
+
+
+def next_after_last(conn, show_id: int):
+    """The episode after the furthest one of this show in your history (S1E1 if none)."""
+    last = conn.execute("SELECT season, episode FROM items WHERE tmdb=? AND kind='episode'"
+                        " ORDER BY season DESC, episode DESC LIMIT 1", (show_id,)).fetchone()
+    if not last:
+        return 1, 1
+    counts = {s["season_number"]: s.get("episode_count") or 0 for s in tmdb(f"/tv/{show_id}").get("seasons", [])}
+    s, e = last["season"], last["episode"] + 1
+    if e > counts.get(s, e):
+        nxt = [n for n in sorted(counts) if n > s and counts[n] > 0]
+        if nxt:
+            s, e = nxt[0], 1
+        # else: a new series TMDB is still filling in (1 of 4 listed): the next number anyway
+    return s, e
+
+
+def auto_identify_session(conn, sess):
+    """(kind, tmdb id, season, episode, how) for a session the rules are sure about, else None."""
+    title, sub = (sess["hint_title"] or "").strip(), (sess["hint_extra"] or "").strip()
+    if not title:
+        return None
+    if sess["app_id"] in NO_GUESS_APPS:
+        if sub.lower() not in YT_MOVIE_CHANNELS:
+            return None
+        sub = ""   # YouTube's film store: the title is a film
+    season, episode = sess["hint_season"], sess["hint_episode"]
+    name, ep_name = title, ""
+    if not episode:
+        ref = parse_episode_ref(title)
+        if ref:
+            season, episode, ep_name = ref
+            name = ""
+        elif parse_episode_ref(sub):
+            season, episode, sub = parse_episode_ref(sub)
+            ep_name, name = title, ""
+    if episode:
+        for n in (name, sub):
+            show = tmdb_unique(n, "tv")
+            if show:
+                return "tv", show["id"], season, episode, "match"
+        if ep_name:   # no show name (Tubi): the show you were watching in this app, if the name matches
+            prev = conn.execute(
+                "SELECT i.tmdb FROM items i JOIN sessions s ON s.id=i.session_id WHERE s.app_id=? AND i.kind='episode'"
+                " AND i.tmdb IS NOT NULL AND s.started_at > ? AND s.id <> ? ORDER BY s.started_at DESC LIMIT 1",
+                (sess["app_id"], time.time() - 30 * 86400, sess["id"])).fetchone()
+            if prev:
+                sz = next((z for z in show_episodes(prev["tmdb"])["seasons"] if z["number"] == season), None)
+                ep = next((e for e in (sz or {}).get("episodes", []) if e["number"] == episode), None)
+                if ep and _norm_title(ep.get("name")) == _norm_title(ep_name):
+                    return "tv", prev["tmdb"], season, episode, "continuation"
+        return None
+    mv = tmdb_unique(title, "movie")
+    show = tmdb_unique(sub, "tv") if sub else None
+    if mv and not show:
+        return "movie", mv["id"], None, None, "match"
+    if show:   # "episode name / show"
+        se = episode_by_name(show["id"], title)
+        if se == "placeholders":
+            nxt = next_after_last(conn, show["id"])
+            return ("tv", show["id"], nxt[0], nxt[1], "progress") if nxt else None
+        if se:
+            return "tv", show["id"], se[0], se[1], "match"
+    return None
+
+
+GUESS_NOTE = ("Episode guessed from your progress (the series has no episode names yet): "
+              "confirm it with Identify to send it")
+
+
+def auto_identify() -> int:
+    """Identify recent sessions without items from what the device published (see the rules above)."""
+    conn = db.connect()
+    rows = conn.execute(
+        "SELECT * FROM sessions WHERE source <> 'plex' AND ignored = 0 AND COALESCE(hint_title, '') <> ''"
+        " AND started_at > ? AND id NOT IN (SELECT session_id FROM items)", (time.time() - 3 * 86400,)).fetchall()
+    done = 0
+    for s in rows:
+        key = (s["id"], s["hint_title"], s["hint_extra"])
+        if time.time() - AUTO_TRIED.get(key, 0) < 3600:
+            continue
+        AUTO_TRIED[key] = time.time()
+        try:
+            hit = auto_identify_session(conn, s)
+        except Exception as e:
+            print(f"Auto-identify {s['id']}: {e}", flush=True)
+            continue
+        if not hit:
+            continue
+        kind, tid, season, episode, how = hit
+        body = {"kind": kind, "tmdb": tid}
+        if kind == "tv":
+            body.update(season=season, episodes=[episode])
+        api_identify(s["id"], body)
+        conn.execute("UPDATE items SET auto_how=? WHERE session_id=?", (how, s["id"]))
+        if how == "progress":   # never sent until you confirm it
+            conn.execute("UPDATE items SET trakt_error=?, simkl_error=? WHERE session_id=?",
+                         (GUESS_NOTE, GUESS_NOTE, s["id"]))
+        it = db.current_item(conn, s["id"])
+        print(f"Auto-identified session {s['id']} ({how}): {it['title']}"
+              + (f" S{it['season']}E{it['episode']}" if it["kind"] == "episode" else ""), flush=True)
+        done += 1
+    return done
 
 
 def api_next(sid: int, auto: bool = False) -> dict:
