@@ -343,3 +343,33 @@ func (s *Store) RecentShow(ctx context.Context, userID int64, appID string, sinc
 	id.Kind, id.Year, id.TVDB = model.KindEpisode, int(year.Int64), int(tvdb.Int64)
 	return &id, nil
 }
+
+// Unidentified lists sessions in these apps started after since that have
+// no current item and are not ignored, oldest first.
+func (s *Store) Unidentified(ctx context.Context, appIDs []string, since time.Time) ([]*model.Session, error) {
+	if len(appIDs) == 0 {
+		return nil, nil
+	}
+	q := "SELECT " + sessionCols + " FROM sessions WHERE app_id IN (?" + strings.Repeat(",?", len(appIDs)-1) +
+		") AND hidden <> 'ignored' AND started_at > ? AND NOT EXISTS (SELECT 1 FROM items WHERE session_id = sessions.id" +
+		" AND replaced_at IS NULL) ORDER BY started_at"
+	args := make([]any, 0, len(appIDs)+1)
+	for _, a := range appIDs {
+		args = append(args, a)
+	}
+	args = append(args, ms(since))
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer rows.Close()
+	var out []*model.Session
+	for rows.Next() {
+		sess, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}

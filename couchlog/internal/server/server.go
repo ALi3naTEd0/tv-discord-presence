@@ -15,6 +15,7 @@ import (
 	"github.com/ALi3naTEd0/couchlog/internal/engine"
 	"github.com/ALi3naTEd0/couchlog/internal/identify"
 	"github.com/ALi3naTEd0/couchlog/internal/model"
+	"github.com/ALi3naTEd0/couchlog/internal/netflix"
 	"github.com/ALi3naTEd0/couchlog/internal/source"
 	"github.com/ALi3naTEd0/couchlog/internal/source/androidtv"
 	"github.com/ALi3naTEd0/couchlog/internal/source/plex"
@@ -92,6 +93,13 @@ func (s *Server) Run(ctx context.Context) error {
 		go func() {
 			defer wg.Done()
 			s.posterLoop(ctx)
+		}()
+	}
+	if s.Config.Netflix && s.Ident != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.netflixLoop(ctx, &netflix.Client{})
 		}()
 	}
 	if p := s.Config.Plex; p != nil {
@@ -268,6 +276,53 @@ func (s *Server) FillPosters(ctx context.Context, tried map[int64]time.Time) (in
 			}
 			n++
 		}
+	}
+	return n, nil
+}
+
+// netflixLoop identifies Netflix sessions from the account's viewing
+// activity every ten minutes, only while some from the last week wait.
+func (s *Server) netflixLoop(ctx context.Context, c *netflix.Client) {
+	for {
+		if n, err := s.IdentifyNetflix(ctx, c); err != nil {
+			s.Log.Warn("Netflix", "err", err)
+		} else if n > 0 {
+			s.Log.Info("Netflix sessions identified", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(10 * time.Minute):
+		}
+	}
+}
+
+// IdentifyNetflix matches unidentified Netflix sessions of the last week
+// with the viewing activity and identifies the ones it is sure about.
+func (s *Server) IdentifyNetflix(ctx context.Context, c *netflix.Client) (int, error) {
+	pending, err := s.Store.Unidentified(ctx, netflix.Apps, time.Now().AddDate(0, 0, -7))
+	if err != nil || len(pending) == 0 {
+		return 0, err
+	}
+	viewed, err := c.Activity(ctx, 0, 50)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, p := range netflix.Match(pending, viewed) {
+		it, err := netflix.Resolve(ctx, c, s.Ident, p.Viewed)
+		if err != nil {
+			s.Log.Warn("Netflix", "title", p.Viewed.Title, "err", err)
+			continue
+		}
+		if it == nil {
+			continue
+		}
+		if err := s.Store.Identify(ctx, p.Session.ID, []model.Item{*it}, s.Config.Sinks, time.Now()); err != nil {
+			return n, err
+		}
+		s.Log.Info("identified", "session", p.Session.ID, "title", it.Title, "season", it.Season, "episode", it.Episode, "by", "netflix")
+		n++
 	}
 	return n, nil
 }

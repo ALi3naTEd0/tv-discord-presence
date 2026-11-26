@@ -44,6 +44,9 @@ type Config struct {
 	// EnvFiles are extra KEY=value files read for secrets when the
 	// environment does not have them (tvpresence's .env works).
 	EnvFiles []string `toml:"env_files"`
+	// Netflix identifies Netflix sessions from your account's viewing
+	// activity, with the Netflix session of a browser on this computer.
+	Netflix bool `toml:"netflix"`
 }
 
 // Load reads a settings file.

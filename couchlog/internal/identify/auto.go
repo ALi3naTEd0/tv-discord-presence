@@ -137,7 +137,7 @@ func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) 
 			if n == "" {
 				continue
 			}
-			show, err := id.unique(ctx, n, Show)
+			show, err := id.Unique(ctx, n, Show, 0)
 			if err != nil || show == nil {
 				if err != nil {
 					return nil, "", err
@@ -168,7 +168,7 @@ func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) 
 
 	// 3. A film by its exact name.
 	// A subtitle that names a show means the title is an episode's name.
-	mv, err := id.unique(ctx, title, Movie)
+	mv, err := id.Unique(ctx, title, Movie, 0)
 	if err != nil {
 		return nil, "", err
 	}
@@ -182,7 +182,7 @@ func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) 
 
 	// 4. "Episode name / show".
 	if sub != "" {
-		show, err := id.unique(ctx, sub, Show)
+		show, err := id.Unique(ctx, sub, Show, 0)
 		if err != nil {
 			return nil, "", err
 		}
@@ -196,32 +196,38 @@ func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) 
 // unknownShow reports that a subtitle does not name a show (so a title that
 // is also a film's name is that film, not an episode called like it).
 func (id *Identifier) unknownShow(ctx context.Context, sub string) bool {
-	show, err := id.unique(ctx, sub, Show)
+	show, err := id.Unique(ctx, sub, Show, 0)
 	return err == nil && show == nil
 }
 
-// unique is the only TMDB title of that kind whose name (or original name)
-// is n; nil when there is none or more than one.
-func (id *Identifier) unique(ctx context.Context, n string, k Kind) (*Title, error) {
+// Unique is the only TMDB title of that kind whose name (or original name)
+// is n (and, when several share it, whose year is year); nil when there is
+// none or still more than one.
+func (id *Identifier) Unique(ctx context.Context, n string, k Kind, year int) (*Title, error) {
 	found, err := id.Catalog.Search(ctx, n)
 	if err != nil {
 		return nil, err
 	}
 	want := store.NormalizeTitle(n)
-	var match *Title
+	var hits []*Title
 	for i, t := range found {
-		if t.Kind != k {
-			continue
+		if t.Kind == k && (store.NormalizeTitle(t.Title) == want || store.NormalizeTitle(t.OriginalTitle) == want) {
+			hits = append(hits, &found[i])
 		}
-		if store.NormalizeTitle(t.Title) != want && store.NormalizeTitle(t.OriginalTitle) != want {
-			continue
-		}
-		if match != nil {
-			return nil, nil // a remake, or two shows with that name: ask
-		}
-		match = &found[i]
 	}
-	return match, nil
+	if len(hits) > 1 && year != 0 {
+		var same []*Title
+		for _, h := range hits {
+			if h.Year == year {
+				same = append(same, h)
+			}
+		}
+		hits = same
+	}
+	if len(hits) != 1 {
+		return nil, nil // none, or a remake / two shows with that name: ask
+	}
+	return hits[0], nil
 }
 
 // episodeOf builds the episode of a known show: by number when the device

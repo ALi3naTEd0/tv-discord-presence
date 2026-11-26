@@ -236,8 +236,9 @@ with the exact start time of each title (only the latest viewing per title).
 Couchlog reads it with the user's Netflix session through Netflix's internal
 web API (as Universal Trakt Scrobbler does), matches each title to the TV
 session that started within 5 min, and identifies it through TMDB with
-Netflix's English titles and real season/episode numbers. Prototype in the
-Python dashboard (`netflix_identify`); to port.
+Netflix's English titles and real season/episode numbers
+(`internal/netflix`; the server runs it every 10 min while Netflix sessions
+from the last week wait, with `netflix = true` in the settings).
 
 Getting the session, universally, in the same binary (no extension, no
 password, no separate app):
