@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -265,7 +266,11 @@ func copyFile(from, to string) error {
 }
 
 func TestOpenPathWithURICharacters(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "50% off?#x", "couchlog.db")
+	name := "50% off?#x"
+	if runtime.GOOS == "windows" {
+		name = "50% off#x" // Windows does not allow ? in names
+	}
+	p := filepath.Join(t.TempDir(), name, "couchlog.db")
 	s, err := Open(context.Background(), p)
 	if err != nil {
 		t.Fatal(err)

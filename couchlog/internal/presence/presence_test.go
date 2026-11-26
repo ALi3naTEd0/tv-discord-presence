@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -70,8 +71,12 @@ func TestBuildHintAndBare(t *testing.T) {
 	}
 }
 
-// fakeDiscord answers the handshake and SET_ACTIVITY on a unix socket.
+// fakeDiscord answers the handshake and SET_ACTIVITY on a unix socket
+// (Windows uses a named pipe, which these tests do not fake).
 func fakeDiscord(t *testing.T, got chan<- map[string]any) string {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake Discord is a Unix socket")
+	}
 	dir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	t.Setenv("TMPDIR", dir)

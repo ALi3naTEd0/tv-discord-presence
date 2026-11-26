@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -22,7 +23,8 @@ func TestSavedSessionComesFirst(t *testing.T) {
 	if err := (&Saved{Cookies: map[string]string{"NetflixId": "n1"}, SavedAt: time.Now(), How: "connect"}).Save(path); err != nil {
 		t.Fatal(err)
 	}
-	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+	// Windows has no Unix modes: the per-user profile folder protects it there.
+	if fi, _ := os.Stat(path); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("session file mode %v", fi.Mode().Perm())
 	}
 	c, src, err := get()
