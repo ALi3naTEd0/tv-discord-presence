@@ -55,6 +55,12 @@ type Config struct {
 	// public API keys; the tokens stay in their files.
 	Trakt *Service `toml:"trakt"`
 	Simkl *Service `toml:"simkl"`
+	// Presence shows what you watch as your Discord status: "on", "off"
+	// (default), or "dry-run" (log it only, while tvpresence owns it).
+	Presence string `toml:"presence"`
+	// DiscordClientID is the Discord application shown ("Watching …");
+	// "" = Couchlog's own, built in.
+	DiscordClientID string `toml:"discord_client_id"`
 }
 
 // Service is a destination's credentials.
@@ -171,6 +177,7 @@ func readEnv(path string) map[string]string {
 func FromTvpresence(path string) (*Config, error) {
 	var old struct {
 		TVHost    string `toml:"tv_host"`
+		ClientID  string `toml:"client_id"`
 		AndroidTV struct {
 			Host string `toml:"host"`
 			Port int    `toml:"port"`
@@ -214,6 +221,7 @@ func FromTvpresence(path string) (*Config, error) {
 	// (tvpresence still sends), with the credentials it already uses.
 	home, _ := os.UserHomeDir()
 	c.ReadOnly = true
+	c.Presence, c.DiscordClientID = "dry-run", old.ClientID // tvpresence still shows your status
 	c.Sinks = []string{"trakt", "simkl"}
 	c.Trakt = &Service{TokenFile: filepath.Join(home, ".local", "share", "trakt-scrobbler", "trakt_token.json")}
 	c.Simkl = &Service{TokenFile: filepath.Join(home, ".config", "simkl", "token.json")}

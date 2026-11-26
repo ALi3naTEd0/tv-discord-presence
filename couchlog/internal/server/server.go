@@ -17,6 +17,7 @@ import (
 	"github.com/ALi3naTEd0/couchlog/internal/identify"
 	"github.com/ALi3naTEd0/couchlog/internal/model"
 	"github.com/ALi3naTEd0/couchlog/internal/netflix"
+	"github.com/ALi3naTEd0/couchlog/internal/presence"
 	"github.com/ALi3naTEd0/couchlog/internal/source"
 	"github.com/ALi3naTEd0/couchlog/internal/source/androidtv"
 	"github.com/ALi3naTEd0/couchlog/internal/source/plex"
@@ -46,7 +47,11 @@ type Server struct {
 // read from the environment or the settings' env files.
 func New(cfg *config.Config, st *store.Store, log *slog.Logger) *Server {
 	s := &Server{Config: cfg, Store: st, Log: log}
-	if key := cfg.Secret("COUCHLOG_TMDB_KEY", "TMDB_API_KEY"); key != "" {
+	key := cfg.Secret("COUCHLOG_TMDB_KEY", "TMDB_API_KEY")
+	if key == "" {
+		key = identify.DefaultKey
+	}
+	if key != "" {
 		s.Ident = &identify.Identifier{Catalog: &identify.TMDB{Key: key, Language: cfg.Language}, Aliases: st,
 			Posters: &identify.IMDb{}, History: st}
 	} else {
@@ -71,6 +76,8 @@ func (s *Server) source(d config.Device, id int64) source.Source {
 // Run listens to every device and imports Plex until ctx ends.
 func (s *Server) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
+	var trackers []deviceTracker
+	var plexClient *plex.Client
 	for _, d := range s.Config.Devices {
 		id, err := s.Store.EnsureDevice(ctx, store.LocalUserID, d.Kind, d.Name, d.Host)
 		if err != nil {
@@ -85,6 +92,7 @@ func (s *Server) Run(ctx context.Context) error {
 		if s.Ident != nil {
 			tr.Next = s.Ident.Next
 		}
+		trackers = append(trackers, deviceTracker{kind: d.Kind, tr: tr})
 		src := s.source(d, id)
 		wg.Add(1)
 		go func() {
@@ -134,6 +142,7 @@ func (s *Server) Run(ctx context.Context) error {
 				db = plex.DefaultDBPath()
 			}
 			c := &plex.Client{URL: p.URL, Token: token, AccountID: p.Account, User: p.User, DeviceID: id, DBPath: db}
+			plexClient = c
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -141,8 +150,95 @@ func (s *Server) Run(ctx context.Context) error {
 			}()
 		}
 	}
+	if mode := s.Config.Presence; mode == "on" || mode == "dry-run" {
+		id := s.Config.DiscordClientID
+		if id == "" {
+			id = s.Config.Secret("COUCHLOG_DISCORD_CLIENT_ID")
+		}
+		if id == "" {
+			id = presence.DefaultClientID
+		}
+		if id == "" && mode == "on" {
+			s.Log.Warn("no Discord application id: the Discord status stays off")
+		} else {
+			r := &presence.Runner{ClientID: id, DryRun: mode == "dry-run", Log: s.Log}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.presenceLoop(ctx, r, trackers, plexClient)
+			}()
+		}
+	}
 	wg.Wait()
 	return nil
+}
+
+type deviceTracker struct {
+	kind string
+	tr   *engine.Tracker
+}
+
+// notShownOnTV are apps the TV status skips: music, and Plex, which shows
+// from the Plex server with exact IDs instead.
+var notShownOnTV = map[string]bool{"com.plexapp.android": true, "com.spotify.tv.android": true,
+	"com.google.android.youtube.tvmusic": true}
+
+// presenceLoop updates the Discord status every five seconds: the LG's own
+// app first, then the box, then Plex on any device.
+func (s *Server) presenceLoop(ctx context.Context, r *presence.Runner, trackers []deviceTracker, px *plex.Client) {
+	defer r.Close()
+	order := append(append([]deviceTracker{}, filterKind(trackers, "webos")...), filterKind(trackers, "androidtv")...)
+	for {
+		r.Show(s.nowPlaying(ctx, order, px), time.Now())
+		select {
+		case <-ctx.Done():
+			r.Show(nil, time.Now())
+			return
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
+func filterKind(ts []deviceTracker, kind string) []deviceTracker {
+	var out []deviceTracker
+	for _, t := range ts {
+		if t.kind == kind {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// nowPlaying is what the Discord status shows, or nil.
+func (s *Server) nowPlaying(ctx context.Context, order []deviceTracker, px *plex.Client) *presence.Now {
+	for _, d := range order {
+		o, sess := d.tr.Last()
+		if o.App.ID == "" || notShownOnTV[o.App.ID] || (o.State != model.StatePlaying && o.State != model.StatePaused) {
+			continue
+		}
+		n := &presence.Now{App: o.App, State: o.State, Hint: o.Hint, Position: o.Position}
+		if sess != nil {
+			n.Played = sess.Played
+			if its, err := s.Store.Items(ctx, sess.ID); err == nil && len(its) > 0 {
+				n.Item = &its[len(its)-1]
+			}
+		}
+		return n
+	}
+	if px == nil {
+		return nil
+	}
+	now, err := px.NowPlaying(ctx)
+	if err != nil || len(now) == 0 {
+		return nil
+	}
+	p := now[0]
+	it := &model.Item{Identity: p.Identity, RuntimeMinutes: int(p.Duration.Minutes())}
+	if s.Ident != nil && (it.TMDB != 0 || it.IMDb != "") {
+		it.Poster = s.Ident.Poster(ctx, *it)
+	}
+	off := p.Offset
+	return &presence.Now{App: model.App{ID: "plex", Name: "Plex"}, State: p.State, Item: it, Position: &off, Device: p.Device}
 }
 
 // follow feeds one device's observations to its tracker. The source keeps

@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/ALi3naTEd0/couchlog/internal/model"
@@ -129,6 +130,10 @@ type Tracker struct {
 	// OnEvent, if set, is called for every session change.
 	OnEvent func(Event)
 
+	lastMu   sync.Mutex
+	lastObs  model.Observation
+	lastSess *model.Session
+
 	// Next, if set, returns the episode after an identified one
 	// (identify.Identifier.Next). With it the tracker splits the session
 	// when an app autoplays the next episode; Sinks get its deliveries.
@@ -180,6 +185,22 @@ func (t *Tracker) close(ctx context.Context, s *model.Session, why string) error
 // Observe applies one observation and returns the device's open session
 // afterwards (nil if none).
 func (t *Tracker) Observe(ctx context.Context, o model.Observation) (*model.Session, error) {
+	sess, err := t.observe(ctx, o)
+	t.lastMu.Lock()
+	t.lastObs, t.lastSess = o, sess
+	t.lastMu.Unlock()
+	return sess, err
+}
+
+// Last is the latest observation and the open session after it (nil if
+// none): what plays on the device now, for the Discord status.
+func (t *Tracker) Last() (model.Observation, *model.Session) {
+	t.lastMu.Lock()
+	defer t.lastMu.Unlock()
+	return t.lastObs, t.lastSess
+}
+
+func (t *Tracker) observe(ctx context.Context, o model.Observation) (*model.Session, error) {
 	now := o.At
 	var gap time.Duration
 	if !t.lastAt.IsZero() {

@@ -245,6 +245,24 @@ parallel run uses it with the credentials tvpresence already has
 what Trakt and Simkl have for what Couchlog identified. Sending turns on at
 the switch-over, with Couchlog's own apps and device login.
 
+## Discord status
+
+`internal/presence` talks to the Discord app over its local IPC (a Unix
+socket: native, Flatpak, Snap, Vesktop; a named pipe on Windows) and shows
+what tvpresence shows: an identified title with its poster, the episode
+line or "Movie", and a progress bar when the device knows the real
+position and the runtime is not an estimate; what the app published
+(YouTube's title and channel); or just "Watching Netflix". It runs inside
+`couchlog server` when the server is on the computer with Discord
+(`presence = "on"`); the separate agent for a server elsewhere comes with
+the API. Order: the LG's own app, then the box (minus Plex and music),
+then Plex on any player. A status is sent only when it changes or after a
+seek. `presence = "dry-run"` logs it instead (the parallel run, while
+tvpresence owns the status). Couchlog's Discord application id, like its
+TMDB key, goes into release builds at compile time from CI secrets
+(`-ldflags -X …presence.DefaultClientID`, `…identify.DefaultKey`), so
+nobody installing it sets either.
+
 ## Netflix
 
 Netflix publishes nothing on the TV (no media session metadata on Android

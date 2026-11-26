@@ -14,6 +14,12 @@ import (
 	"time"
 )
 
+// DefaultKey is Couchlog's own TMDB key, put into release builds at compile
+// time from a CI secret (-ldflags "-X .../identify.DefaultKey=..."), so
+// nobody installing Couchlog sees or sets one. COUCHLOG_TMDB_KEY overrides
+// it (development, or your own key).
+var DefaultKey string
+
 // PosterBase is where TMDB serves posters at the size the dashboard uses.
 const PosterBase = "https://image.tmdb.org/t/p/w342"
 
