@@ -15,8 +15,11 @@ import (
 
 	"github.com/ALi3naTEd0/couchlog/internal/compare"
 	"github.com/ALi3naTEd0/couchlog/internal/config"
+	"github.com/ALi3naTEd0/couchlog/internal/deliver"
+	"github.com/ALi3naTEd0/couchlog/internal/model"
 	"github.com/ALi3naTEd0/couchlog/internal/netflix"
 	"github.com/ALi3naTEd0/couchlog/internal/server"
+	"github.com/ALi3naTEd0/couchlog/internal/sink"
 	"github.com/ALi3naTEd0/couchlog/internal/store"
 )
 
@@ -151,5 +154,80 @@ func connectCmd(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return err
 	}
 	fmt.Fprintf(stdout, "Saved in %s; Couchlog reads your Netflix activity with it from now on (%s).\n", path, p.Name)
+	return nil
+}
+
+// checkCmd compares what Couchlog identified with your Trakt and Simkl
+// history, read-only: it changes nothing anywhere.
+func checkCmd(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cfgPath := fs.String("config", defaultConfig(), "settings file")
+	days := fs.Int("days", 7, "how far back")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := config.Load(*cfgPath)
+	if err != nil {
+		return err
+	}
+	if len(cfg.Sinks) == 0 {
+		cfg.Sinks = []string{"trakt", "simkl"}
+	}
+	sinks, errs := deliver.Sinks(cfg)
+	for _, e := range errs {
+		fmt.Fprintln(stderr, "skipped:", e)
+	}
+	dbPath := cfg.DB
+	if dbPath == "" {
+		dbPath = defaultDB()
+	}
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	watches, err := st.Watches(ctx, time.Now().AddDate(0, 0, -*days), time.Now())
+	if err != nil {
+		return err
+	}
+	var entries []sink.Entry
+	labels := map[int64]string{}
+	for _, w := range watches {
+		times := deliver.WatchedTimes(w)
+		for _, it := range w.Items {
+			entries = append(entries, sink.Entry{Item: it, WatchedAt: times[it.ID]})
+			l := it.Title
+			if it.Kind == model.KindEpisode {
+				l += fmt.Sprintf(" S%dE%d", it.Season, it.Episode)
+			}
+			labels[it.ID] = time.UnixMilli(times[it.ID]).Format("01-02 15:04") + "  " + l
+		}
+	}
+	if len(entries) == 0 {
+		fmt.Fprintln(stdout, "Nothing identified in that time.")
+		return nil
+	}
+	results := map[string]map[int64]sink.Result{}
+	for _, sk := range sinks {
+		res, err := sk.Check(ctx, entries)
+		if err != nil {
+			fmt.Fprintf(stdout, "%s: %v\n", sk.Name(), err)
+			continue
+		}
+		results[sk.Name()] = map[int64]sink.Result{}
+		for _, r := range res {
+			results[sk.Name()][r.ItemID] = r
+		}
+	}
+	for _, e := range entries {
+		line := fmt.Sprintf("%-60.60s", labels[e.Item.ID])
+		for _, sk := range sinks {
+			if r, ok := results[sk.Name()][e.Item.ID]; ok {
+				line += fmt.Sprintf("  %s: %-9s", sk.Name(), r.Status)
+			}
+		}
+		fmt.Fprintln(stdout, line)
+	}
 	return nil
 }

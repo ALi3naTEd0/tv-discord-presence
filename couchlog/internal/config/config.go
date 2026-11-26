@@ -47,6 +47,20 @@ type Config struct {
 	// Netflix identifies Netflix sessions from your account's viewing
 	// activity, with the Netflix session of a browser on this computer.
 	Netflix bool `toml:"netflix"`
+	// ReadOnly: destinations are only checked, never written to (the
+	// parallel run, while tvpresence still sends).
+	ReadOnly bool `toml:"read_only"`
+	// Trakt and Simkl credentials, until Couchlog's own sign-in: for now
+	// trakt-scrobbler's token and your Simkl folder. The client IDs are
+	// public API keys; the tokens stay in their files.
+	Trakt *Service `toml:"trakt"`
+	Simkl *Service `toml:"simkl"`
+}
+
+// Service is a destination's credentials.
+type Service struct {
+	ClientID  string `toml:"client_id"`  // "" = COUCHLOG_<NAME>_CLIENT_ID, or SIMKL_CLIENT_ID in env files
+	TokenFile string `toml:"token_file"` // JSON with access_token (and expires_at / created_at+expires_in)
 }
 
 // Load reads a settings file.
@@ -69,6 +83,11 @@ func Load(path string) (*Config, error) {
 		c.EnvFiles[i] = Expand(f)
 	}
 	c.DB = Expand(c.DB)
+	for _, s := range []*Service{c.Trakt, c.Simkl} {
+		if s != nil {
+			s.TokenFile = Expand(s.TokenFile)
+		}
+	}
 	if c.Plex != nil {
 		c.Plex.DB = Expand(c.Plex.DB)
 		if c.Plex.Account == 0 {
@@ -191,5 +210,13 @@ func FromTvpresence(path string) (*Config, error) {
 	if len(c.Devices) == 0 {
 		return nil, errors.New("config: no TV or box in " + path)
 	}
+	// The parallel run: check against Trakt and Simkl, never write
+	// (tvpresence still sends), with the credentials it already uses.
+	home, _ := os.UserHomeDir()
+	c.ReadOnly = true
+	c.Sinks = []string{"trakt", "simkl"}
+	c.Trakt = &Service{TokenFile: filepath.Join(home, ".local", "share", "trakt-scrobbler", "trakt_token.json")}
+	c.Simkl = &Service{TokenFile: filepath.Join(home, ".config", "simkl", "token.json")}
+	c.EnvFiles = append(c.EnvFiles, filepath.Join(home, ".config", "simkl", ".env"))
 	return c, nil
 }

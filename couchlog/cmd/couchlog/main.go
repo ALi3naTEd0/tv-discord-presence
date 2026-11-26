@@ -4,6 +4,7 @@
 //	couchlog server [-config path]                  listen to the TVs, import Plex
 //	couchlog compare [-since 24h] [-diff]           Go vs tvpresence, session by session
 //	couchlog connect netflix                        sign in to Netflix in Couchlog's own window
+//	couchlog check [-days 7]                        what Trakt and Simkl already have (read-only)
 //	couchlog import [-db path] [history.db]         bring in a tvpresence history
 package main
 
@@ -30,7 +31,7 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: couchlog init | server | compare | connect netflix | import | version")
+		return errors.New("usage: couchlog init | server | compare | connect netflix | check | import | version")
 	}
 	switch args[0] {
 	case "version":
@@ -46,6 +47,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return compareCmd(ctx, args[1:], stdout, stderr)
 	case "connect":
 		return connectCmd(ctx, args[1:], stdout, stderr)
+	case "check":
+		return checkCmd(ctx, args[1:], stdout, stderr)
 	}
 	return fmt.Errorf("unknown command %q", args[0])
 }

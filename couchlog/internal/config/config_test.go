@@ -24,7 +24,9 @@ host = "192.168.1.117"
 		c.Devices[1].Host != "192.168.1.117" || c.Devices[1].KeyFile != filepath.Join(dir, "adbkey") {
 		t.Fatalf("devices %+v", c.Devices)
 	}
-	if c.Plex == nil || c.Plex.URL != "http://127.0.0.1:32400" || c.Plex.Account != 1 || len(c.Sinks) != 0 {
+	// The parallel run checks Trakt and Simkl but never writes to them.
+	if c.Plex == nil || c.Plex.URL != "http://127.0.0.1:32400" || c.Plex.Account != 1 || !c.ReadOnly || len(c.Sinks) != 2 ||
+		c.Trakt == nil || c.Simkl == nil {
 		t.Errorf("plex %+v sinks %v", c.Plex, c.Sinks)
 	}
 	p := filepath.Join(dir, "couchlog", "config.toml")

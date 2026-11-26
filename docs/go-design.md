@@ -215,18 +215,31 @@ the files are a handful, and those plays are already correct.
 
 ```go
 type Sink interface {
-    Name() string                                              // "trakt", "simkl"
-    Check(ctx context.Context, items []model.Item) ([]Result, error)  // already in your history? exists there?
-    Push(ctx context.Context, items []model.Item) ([]Result, error)
+    Name() string                                             // "trakt", "simkl"
+    Check(ctx context.Context, e []Entry) ([]Result, error)  // already in your history? on the service?
+    Push(ctx context.Context, e []Entry) ([]Result, error)
+    Remove(ctx context.Context, e []Entry) ([]Result, error) // a correction's wrong play
 }
 ```
 
-Statuses per item and sink are the ones in use today: `pending`, `ready`
-(exists on the service, not in your history yet), `added`, `not_found`,
-`skipped`, `error`, plus `remove` / `removed` for corrections (see below). Auto-send keeps today's rule: identified, closed, watched
-time ≥ 80 % of the runtime (Plex always), check first so nothing is
-duplicated, `not_found` retried at most daily. Requests respect `Retry-After`
-and back off like CatchMe's downloader.
+`internal/sink/trakt` and `internal/sink/simkl` go by external ID only
+(IMDb, TMDB, TVDB for shows), at most one write per ~1 s, waiting out
+`Retry-After`. Trakt: a play is "yours" if your history has it within
+±12 h; Remove takes out only that play by its history id. Simkl keeps one
+mark per title or episode, so Check reads your lists and Remove unmarks.
+
+`internal/deliver` keeps today's rules: Plex plays always; TV sessions
+once you watched ≥ 80 % of a real (not estimated) runtime, otherwise a
+note says why; always Check before Push, so nothing is sent twice;
+`not_found` asked again daily; five failures stop retries. Statuses:
+`pending`, `ready`, `added`, `not_found`, `skipped`, `error`, `remove` /
+`removed`.
+
+**Read-only** (`read_only = true`): only Check, never Push or Remove. The
+parallel run uses it with the credentials tvpresence already has
+(trakt-scrobbler's token, your Simkl folder), and `couchlog check` lists
+what Trakt and Simkl have for what Couchlog identified. Sending turns on at
+the switch-over, with Couchlog's own apps and device login.
 
 ## Netflix
 

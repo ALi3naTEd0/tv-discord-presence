@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ALi3naTEd0/couchlog/internal/config"
+	"github.com/ALi3naTEd0/couchlog/internal/deliver"
 	"github.com/ALi3naTEd0/couchlog/internal/engine"
 	"github.com/ALi3naTEd0/couchlog/internal/identify"
 	"github.com/ALi3naTEd0/couchlog/internal/model"
@@ -97,6 +98,20 @@ func (s *Server) Run(ctx context.Context) error {
 			defer wg.Done()
 			s.posterLoop(ctx)
 		}()
+	}
+	if len(s.Config.Sinks) > 0 {
+		sinks, errs := deliver.Sinks(s.Config)
+		for _, e := range errs {
+			s.Log.Warn("destination not set up", "err", e)
+		}
+		if len(sinks) > 0 {
+			d := &deliver.Deliverer{Store: s.Store, Sinks: sinks, ReadOnly: s.Config.ReadOnly, Log: s.Log}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.deliverLoop(ctx, d)
+			}()
+		}
 	}
 	if s.Config.Netflix && s.Ident != nil {
 		wg.Add(1)
@@ -329,4 +344,25 @@ func (s *Server) IdentifyNetflix(ctx context.Context, c *netflix.Client) (int, e
 		n++
 	}
 	return n, nil
+}
+
+// deliverLoop checks and sends to the destinations every two minutes.
+func (s *Server) deliverLoop(ctx context.Context, d *deliver.Deliverer) {
+	if d.ReadOnly {
+		s.Log.Info("destinations are read-only: checking, never sending")
+	}
+	for {
+		rep, err := d.Run(ctx)
+		if err != nil && ctx.Err() == nil {
+			s.Log.Warn("deliveries", "err", err)
+		}
+		for name, counts := range rep {
+			s.Log.Info("deliveries", "to", name, "result", counts)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Minute):
+		}
+	}
 }
