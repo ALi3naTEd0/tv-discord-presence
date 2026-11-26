@@ -1253,6 +1253,10 @@ def auto_loop() -> None:
         except Exception as e:
             print(f"Auto-identify: {e}", flush=True)
         try:
+            netflix_identify()
+        except Exception as e:
+            print(f"Netflix: {e}", flush=True)
+        try:
             n = fill_posters()
             if n:
                 print(f"Posters: {n} filled", flush=True)
@@ -1489,6 +1493,218 @@ def api_identify(sid: int, b: dict) -> dict:
     return {"ok": True, "items": len(rows)}
 
 
+# ------------------------------------------------------------------- Netflix
+# Netflix tells the TV nothing (no title in its media session), but your account keeps your
+# viewing activity. The dashboard reads it with the Netflix session your browser on this computer
+# already has: the netflix.com cookies from the browser's own cookie store (like yt-dlp's
+# --cookies-from-browser), read-only, never stored or sent anywhere but Netflix. The browser renews
+# them, so nothing has to be done. The activity comes from Netflix's internal web API, the way
+# Universal Trakt Scrobbler does it (MIT, github.com/trakt-tools/universal-trakt-scrobbler); it is
+# not public and can move.
+NETFLIX = "https://www.netflix.com"
+
+
+def firefox_cookie_dbs() -> list[Path]:
+    """cookies.sqlite of every Zen / Firefox / LibreWolf / Floorp profile on this computer."""
+    home = Path.home()
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config")
+    roots = [xdg / "zen", xdg / "mozilla/firefox", home / ".zen", home / ".mozilla/firefox", home / ".librewolf", home / ".floorp",
+             home / ".var/app/app.zen_browser.zen/.zen", home / ".var/app/org.mozilla.firefox/.mozilla/firefox",
+             home / "snap/firefox/common/.mozilla/firefox",
+             home / "Library/Application Support/zen/Profiles", home / "Library/Application Support/Firefox/Profiles"]
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        roots += [Path(appdata) / "zen/Profiles", Path(appdata) / "Mozilla/Firefox/Profiles"]
+    return [p for r in roots if r.is_dir() for p in r.glob("*/cookies.sqlite")]
+
+
+def netflix_cookies() -> tuple[dict, str]:
+    """(netflix.com cookies, where they came from) from the profile that used Netflix last.
+    The browser keeps the database locked, so a snapshot is read (with its WAL)."""
+    import shutil
+    import tempfile
+    best, best_at, src = None, 0, ""
+    for path in firefox_cookie_dbs():
+        with tempfile.TemporaryDirectory() as tmp:
+            dst = Path(tmp) / "cookies.sqlite"
+            try:
+                shutil.copy2(path, dst)
+                for ext in ("-wal", "-shm"):
+                    if Path(f"{path}{ext}").exists():
+                        shutil.copy2(f"{path}{ext}", f"{dst}{ext}")
+                c = sqlite3.connect(dst)
+                rows = c.execute("SELECT name, value, lastAccessed FROM moz_cookies WHERE host LIKE '%netflix.com'"
+                                 " AND (expiry = 0 OR expiry > ?)", (int(time.time()),)).fetchall()
+                c.close()
+            except (OSError, sqlite3.Error):
+                continue
+        cookies = {n: v for n, v, _ in rows}
+        at = max((a for n, _, a in rows if n == "NetflixId"), default=0)
+        if "NetflixId" in cookies and at > best_at:
+            best, best_at, src = cookies, at, str(path.parent)
+    if not best:
+        raise RuntimeError("Not signed in to Netflix in Zen/Firefox on this computer")
+    return best, src
+
+
+def netflix_http(url: str, data: bytes | None = None, headers: dict | None = None) -> str:
+    cookies = cached(("netflix_cookies",), 600, netflix_cookies)[0]
+    h = {"Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items()),
+         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0",
+         "Accept": "*/*", **(headers or {})}
+    if data is not None:
+        h.setdefault("Content-Type", "application/x-www-form-urlencoded")
+    req = urllib.request.Request(url, data=data, headers=h, method="POST" if data is not None else "GET")
+    with urllib.request.urlopen(req, timeout=25) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def _js_unescape(v: str) -> str:
+    v = re.sub(r"\\x([0-9A-Fa-f]{2})", lambda m: chr(int(m.group(1), 16)), v)
+    v = re.sub(r"\\u([0-9A-Fa-f]{4})", lambda m: chr(int(m.group(1), 16)), v)
+    return v.replace("\\/", "/")
+
+
+def netflix_profile() -> dict:
+    """authURL, profile guid and name, from the viewing-activity page of the saved session."""
+    def fetch():
+        html = netflix_http(f"{NETFLIX}/settings/viewed/")
+        grab = lambda rx: (m.group(1) if (m := re.search(rx, html)) else None)
+        prof = {"auth_url": grab(r'"authURL":"(.*?)"'), "guid": grab(r'"userInfo":\{"data":\{[^}]*"userGuid":"(.*?)"'),
+                "name": grab(r'"userInfo":\{"data":\{"name":"(.*?)"'), "build": grab(r'"BUILD_IDENTIFIER":"(.*?)"')}
+        prof = {k: _js_unescape(v) if v else v for k, v in prof.items()}
+        if not prof["auth_url"] or not prof["guid"]:
+            raise RuntimeError("Netflix session expired or no profile selected: open netflix.com in the browser")
+        return prof
+    return cached(("netflix_profile",), 3600, fetch)
+
+
+def netflix_activity(page: int = 0, size: int = 50) -> list:
+    """This profile's viewing activity, newest first: movieID, series, seriesTitle, title,
+    episodeTitle, date (ms), bookmark and duration (s)."""
+    prof = netflix_profile()
+    path = urllib.parse.quote(json.dumps(["aui", "viewingActivity", page, size], separators=(",", ":")))
+    url = f"{NETFLIX}/api/aui/pathEvaluator/web/%5E2.0.0?method=call&callPath={path}&falcor_server=0.1.0"
+    body = "param=" + urllib.parse.quote(json.dumps({"guid": prof["guid"]}))
+    text = netflix_http(url, body.encode(), {"x-netflix.request.routing":
+                        '{"path":"/nq/aui/endpoint/%5E1.0.0-web/pathEvaluator","control_tag":"auinqweb"}'})
+    return ((json.loads(text).get("jsonGraph") or {}).get("aui") or {}).get("viewingActivity", {}) \
+        .get("value", {}).get("viewedItems") or []
+
+
+def netflix_metadata(movie_id: int) -> dict | None:
+    """A show (all seasons and episodes) or a movie, with English titles and the year."""
+    def fetch():
+        prof = netflix_profile()
+        bases = [f"{NETFLIX}/nq/website/memberapi/release"]
+        if prof.get("build"):
+            bases += [f"{NETFLIX}/nq/website/memberapi/{prof['build']}", f"{NETFLIX}/api/shakti/{prof['build']}"]
+        bases.append(f"{NETFLIX}/api/shakti/mre")
+        for b in bases:
+            for extra in ("", "&authURL=" + urllib.parse.quote(prof["auth_url"])):
+                try:
+                    j = json.loads(netflix_http(f"{b}/metadata?languages=en-US&movieid={movie_id}{extra}"))
+                    if j.get("video"):
+                        return j["video"]
+                except Exception:
+                    continue
+        return None
+    return cached(("netflix_md", movie_id), 24 * 3600, fetch)
+
+
+NETFLIX_APPS = ("com.netflix.ninja", "netflix")
+NETFLIX_WINDOW = 300   # s: Netflix's date is when the title started; the TV session starts within this
+
+
+def netflix_resolve(v: dict):
+    """(kind, tmdb id, season, episode) for a viewing-activity entry, via Netflix's metadata
+    (English titles, real season/episode numbers) and an exact TMDB match; None if unsure."""
+    if v.get("series"):
+        md = netflix_metadata(v["series"])
+        if not md or md.get("type") != "show":
+            return None
+        show = tmdb_unique(md.get("title") or v.get("seriesTitle"), "tv")
+        if not show:
+            return None
+        for s in md.get("seasons", []):
+            for e in s.get("episodes", []):
+                if e.get("id") == v["movieID"]:
+                    if not md.get("hiddenEpisodeNumbers"):
+                        return "tv", show["id"], s["seq"], e["seq"]
+                    se = episode_by_name(show["id"], e.get("title") or v.get("episodeTitle") or "")
+                    return ("tv", show["id"], se[0], se[1]) if isinstance(se, tuple) else None
+        return None
+    md = netflix_metadata(v["movieID"]) or {}
+    mv = tmdb_unique(md.get("title") or v.get("title"), "movie", md.get("year"))
+    return ("movie", mv["id"], None, None) if mv else None
+
+
+def netflix_matches(conn, activity: list) -> list:
+    """[(session row, activity entry)] for unidentified Netflix sessions whose start matches when
+    Netflix says that title started (Netflix keeps only the latest viewing of each title)."""
+    used, out = set(), []
+    rows = conn.execute(
+        "SELECT * FROM sessions WHERE app_id IN (?, ?) AND ignored = 0 AND started_at > ?"
+        " AND id NOT IN (SELECT session_id FROM items) ORDER BY started_at",
+        (*NETFLIX_APPS, time.time() - 7 * 86400)).fetchall()
+    for v in activity:
+        when = v.get("date", 0) / 1000
+        best = min((s for s in rows if s["id"] not in used and abs(s["started_at"] - when) <= NETFLIX_WINDOW),
+                   key=lambda s: abs(s["started_at"] - when), default=None)
+        if best:
+            used.add(best["id"])
+            out.append((best, v))
+    return out
+
+
+NETFLIX_LAST = {"at": 0.0}
+
+
+def netflix_identify(force: bool = False) -> int:
+    """Identify Netflix sessions from your account's viewing activity (every 10 min, only while
+    there are unidentified Netflix sessions from the last 7 days)."""
+    if not force and time.time() - NETFLIX_LAST["at"] < 600:
+        return 0
+    conn = db.connect()
+    pending = conn.execute("SELECT COUNT(*) FROM sessions WHERE app_id IN (?, ?) AND ignored = 0 AND started_at > ?"
+                           " AND id NOT IN (SELECT session_id FROM items)",
+                           (*NETFLIX_APPS, time.time() - 7 * 86400)).fetchone()[0]
+    if not pending:
+        return 0
+    NETFLIX_LAST["at"] = time.time()
+    try:
+        activity = netflix_activity(0, 50)
+    except Exception as e:
+        print(f"Netflix: {e}", flush=True)
+        return 0
+    done = 0
+    for s, v in netflix_matches(conn, activity):
+        hit = netflix_resolve(v)
+        if not hit:
+            continue
+        kind, tid, season, episode = hit
+        body = {"kind": kind, "tmdb": tid}
+        if kind == "tv":
+            body.update(season=season, episodes=[episode])
+        api_identify(s["id"], body)
+        conn.execute("UPDATE items SET auto_how='netflix' WHERE session_id=?", (s["id"],))
+        print(f"Netflix: session {s['id']} is {v.get('title')}", flush=True)
+        done += 1
+    return done
+
+
+def netflix_status() -> dict:
+    try:
+        _, src = netflix_cookies()
+    except Exception as e:
+        return {"connected": False, "reason": str(e)}
+    try:
+        prof = netflix_profile()
+        return {"connected": True, "profile": prof.get("name"), "browser_profile": src}
+    except Exception as e:
+        return {"connected": False, "reason": str(e)[:200], "browser_profile": src}
+
+
 # ------------------------------------------------------- automatic identification
 # The same rules as Couchlog's identify.Auto (Go): only what is certain is identified without
 # asking, because a wrong guess reaches Trakt. What each app publishes on Android TV:
@@ -1517,8 +1733,9 @@ def parse_episode_ref(s: str | None):
     return season, episode, " ".join(rest.split())
 
 
-def tmdb_unique(name: str, kind: str) -> dict | None:
-    """The only TMDB movie/tv whose name or original name is exactly `name`; None if none or several."""
+def tmdb_unique(name: str, kind: str, year: int | None = None) -> dict | None:
+    """The only TMDB movie/tv whose name or original name is exactly `name` (and year, when given
+    and there are several); None if none or still several."""
     if not name:
         return None
     want, hits = _norm_title(name), []
@@ -1528,6 +1745,8 @@ def tmdb_unique(name: str, kind: str) -> dict | None:
         names = {_norm_title(r.get(k)) for k in ("title", "name", "original_title", "original_name")}
         if want in names:
             hits.append(r)
+    if len(hits) > 1 and year:
+        hits = [r for r in hits if year_of(r.get("release_date") or r.get("first_air_date")) == year]
     return hits[0] if len(hits) == 1 else None
 
 
@@ -1795,6 +2014,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, raw=(STATIC_DIR / name).read_bytes(), ctype=ctype)
             if u.path == "/api/plex_now":   # light endpoint for tvpresence (Discord)
                 return self.send(200, {"plex_now": plex_now()})
+            if u.path == "/api/netflix/status":
+                return self.send(200, netflix_status())
             if u.path == "/api/state":
                 return self.send(200, api_state(int(qs.get("days", ["60"])[0])))
             if u.path == "/api/search":
