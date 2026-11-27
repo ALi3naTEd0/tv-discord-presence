@@ -147,7 +147,7 @@ func (r Report) add(sinkName string, st model.DeliveryStatus) {
 // Run checks and sends what is due, and takes out what corrections replaced.
 func (d *Deliverer) Run(ctx context.Context) (Report, error) {
 	now := d.now()
-	watches, err := d.Store.Watches(ctx, now.AddDate(0, 0, -60), now.Add(-time.Minute))
+	watches, err := d.Store.Watches(ctx, now.AddDate(0, 0, -60), now.Add(-15*time.Second))
 	if err != nil {
 		return nil, err
 	}

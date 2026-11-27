@@ -452,7 +452,8 @@ func (s *Server) IdentifyNetflix(ctx context.Context, c *netflix.Client) (int, e
 	return n, nil
 }
 
-// deliverLoop checks and sends to the destinations every two minutes.
+// deliverLoop checks and sends to the destinations every half minute, so a
+// finished viewing reaches Trakt and Simkl right after it ends.
 func (s *Server) deliverLoop(ctx context.Context, d *deliver.Deliverer) {
 	if d.ReadOnly {
 		s.Log.Info("destinations are read-only: checking, never sending")
@@ -468,7 +469,7 @@ func (s *Server) deliverLoop(ctx context.Context, d *deliver.Deliverer) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(2 * time.Minute):
+		case <-time.After(30 * time.Second):
 		}
 	}
 }

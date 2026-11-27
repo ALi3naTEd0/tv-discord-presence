@@ -1261,7 +1261,7 @@ def auto_push() -> None:
         " AND id IN (SELECT session_id FROM items WHERE trakt_status IN ('pending','ready','error')"
         "   OR simkl_status IN ('pending','ready','error')"
         "   OR ((trakt_status='not_found' OR simkl_status='not_found') AND COALESCE(pushed_at,0) < ?))",
-        (time.time() - 60, time.time() - 86400)).fetchall()
+        (time.time() - 15, time.time() - 86400)).fetchall()
     ready = []
     for sess in rows:
         items = conn.execute("SELECT * FROM items WHERE session_id=?", (sess["id"],)).fetchall()
@@ -1328,7 +1328,7 @@ def auto_loop() -> None:
                 print(f"Posters: {n} filled", flush=True)
         except Exception as e:
             print(f"Posters: {e}", flush=True)
-        time.sleep(120)
+        time.sleep(30)   # sends within half a minute of a session ending
         try:
             auto_push()
         except Exception as e:
@@ -1781,7 +1781,7 @@ def netflix_split_open(conn, newest) -> int:
 def netflix_identify(force: bool = False) -> int:
     """Identify Netflix sessions from your account's viewing activity (every 2 min, only while
     there are unidentified Netflix sessions from the last 7 days)."""
-    if not force and time.time() - NETFLIX_LAST["at"] < 110:   # each auto-loop round (2 min) while some wait
+    if not force and time.time() - NETFLIX_LAST["at"] < 55:   # about once a minute, only while some wait
         return 0
     conn = db.connect()
     pending = conn.execute("SELECT COUNT(*) FROM sessions WHERE app_id IN (?, ?) AND ignored = 0 AND started_at > ?"
