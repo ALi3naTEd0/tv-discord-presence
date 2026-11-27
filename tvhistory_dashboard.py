@@ -1951,6 +1951,24 @@ def episode_by_name(show_id: int, name: str):
                 found.append((sz["number"], e["number"]))
     if len(found) == 1:
         return found[0]
+    if not found and want and not placeholders:
+        # apps and TMDB word titles slightly differently ("In Your Own Time" / "In Your Time"):
+        # take the closest name when it is clearly close and clearly ahead of the rest
+        import difflib
+        scored = []
+        for sz in show_episodes(show_id)["seasons"]:
+            for e in sz["episodes"]:
+                have = _norm_title(e.get("name"))
+                if not have or EP_PLACEHOLDER.match(e.get("name") or ""):
+                    continue
+                r = difflib.SequenceMatcher(None, want, have).ratio()
+                a, b = set(want.split()), set(have.split())
+                if min(len(a), len(b)) >= 2 and (a <= b or b <= a):
+                    r = max(r, 0.85)
+                scored.append((r, sz["number"], e["number"]))
+        scored.sort(reverse=True)
+        if scored and scored[0][0] >= 0.8 and (len(scored) == 1 or scored[1][0] < scored[0][0] - 0.1):
+            return scored[0][1], scored[0][2]
     return "placeholders" if not found and placeholders else None
 
 

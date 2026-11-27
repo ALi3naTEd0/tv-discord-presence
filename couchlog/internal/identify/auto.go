@@ -251,6 +251,11 @@ func (id *Identifier) episodeOf(ctx context.Context, userID int64, show, season,
 	want := store.NormalizeTitle(epName)
 	type ref struct{ s, e int }
 	var named []ref
+	type cand struct {
+		ref
+		name string
+	}
+	var all []cand
 	placeholders := true
 	for _, se := range t.Seasons {
 		if se.Episodes == 0 {
@@ -263,10 +268,27 @@ func (id *Identifier) episodeOf(ctx context.Context, userID int64, show, season,
 		for _, e := range eps {
 			if !rePlaceholder.MatchString(e.Name) {
 				placeholders = false
+				all = append(all, cand{ref{se.Number, e.Number}, store.NormalizeTitle(e.Name)})
 			}
 			if want != "" && store.NormalizeTitle(e.Name) == want {
 				named = append(named, ref{se.Number, e.Number})
 			}
+		}
+	}
+	if len(named) == 0 && want != "" && !placeholders {
+		// apps and TMDB word titles slightly differently ("In Your Own Time" / "In Your
+		// Time"): take the closest name when it is clearly close and clearly ahead of the rest
+		best, second, at := 0.0, 0.0, ref{}
+		for _, c := range all {
+			r := titleSimilarity(want, c.name)
+			if r > best {
+				best, second, at = r, best, c.ref
+			} else if r > second {
+				second = r
+			}
+		}
+		if best >= 0.8 && second < best-0.1 {
+			named = append(named, at)
 		}
 	}
 	if len(named) == 1 {
@@ -298,4 +320,51 @@ func (id *Identifier) episodeOf(ctx context.Context, userID int64, show, season,
 		return nil, "", nil
 	}
 	return &it, ByProgress, nil
+}
+
+// titleSimilarity is 1 for equal normalized titles, 0.85 when one title's
+// words (two or more) are all in the other, else 1 - edit distance / length.
+func titleSimilarity(a, b string) float64 {
+	if a == b {
+		return 1
+	}
+	wa, wb := strings.Fields(a), strings.Fields(b)
+	if len(wa) >= 2 && len(wb) >= 2 && (subsetWords(wa, wb) || subsetWords(wb, wa)) {
+		return 0.85
+	}
+	ra, rb := []rune(a), []rune(b)
+	n := max(len(ra), len(rb))
+	if n == 0 {
+		return 0
+	}
+	prev := make([]int, len(rb)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
+		cur[0] = i
+		for j := 1; j <= len(rb); j++ {
+			cost := 1
+			if ra[i-1] == rb[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return 1 - float64(prev[len(rb)])/float64(n)
+}
+
+func subsetWords(small, big []string) bool {
+	have := map[string]bool{}
+	for _, w := range big {
+		have[w] = true
+	}
+	for _, w := range small {
+		if !have[w] {
+			return false
+		}
+	}
+	return true
 }

@@ -147,3 +147,20 @@ func TestAutoYouTubeFilmStore(t *testing.T) {
 		t.Errorf("a regular YouTube video identified: %+v", it)
 	}
 }
+
+func TestAutoHBOEpisodeNameWordedDifferently(t *testing.T) {
+	id, _ := autoRig(t)
+	it, how, err := id.Auto(context.Background(), store.LocalUserID, hbo("Devil in His Own Eyes", "Unseamly: The Investigation of Pete"))
+	if err != nil || it == nil || it.Season != 1 || it.Episode != 2 || how != ByMatch {
+		t.Fatalf("%+v %q %v", it, how, err)
+	}
+}
+
+func TestTitleSimilarity(t *testing.T) {
+	if r := titleSimilarity("in your own time", "in your time"); r < 0.8 {
+		t.Errorf("subset: %v", r)
+	}
+	if r := titleSimilarity("fire and water", "mental evidence"); r >= 0.8 {
+		t.Errorf("unrelated: %v", r)
+	}
+}
