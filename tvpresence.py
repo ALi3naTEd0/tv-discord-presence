@@ -177,6 +177,39 @@ class AndroidTv:
         self._seen_codecs = seen
         return new
 
+    KCODEC = {"hevc": "HEVC", "h265": "HEVC", "av1": "AV1", "vp9": "VP9", "h264": "H.264", "avc": "H.264",
+              "mpeg2": "MPEG-2", "dv": "Dolby Vision"}
+
+    def resolution_events(self) -> list:
+        """Live picture sizes from the box's video driver: [(epoch, codec or None, width, height)].
+        Amlogic logs `Parse from ucode, visible(W x H)` when a stream starts and every time adaptive
+        streaming switches quality, so HBO's ramp 576p -> 1080p -> 4K shows up within seconds, while
+        media.metrics only gets a record once the app releases the decoder."""
+        if self.dev is None:
+            return []
+        try:
+            out = self.dev.shell("logcat -d -b kernel -v epoch | grep -E 'visible\\(|video changed to' | tail -40",
+                                 timeout_s=20)
+        except Exception:
+            return []
+        last = getattr(self, "_res_last", 0.0)
+        new, codec, codec_at = [], None, 0.0
+        for line in out.splitlines():
+            t = re.match(r"\s*(\d+\.\d+)", line)
+            if not t:
+                continue
+            ts = float(t.group(1))
+            c = re.search(r"\]\s+(\w+) video changed to", line)
+            if c:
+                codec, codec_at = self.KCODEC.get(c.group(1).lower()), ts
+                continue
+            m = re.search(r"visible\((\d+) x (\d+)\)", line)
+            if m and ts > last:
+                last = ts
+                new.append((ts, codec if ts - codec_at < 15 else None, int(m.group(1)), int(m.group(2))))
+        self._res_last = last
+        return new
+
     def hdr_events(self) -> list:
         """New 'content dynamic range' reports from the box's video driver: [(epoch, 'SDR'|'HDR10'|'HLG'|'DV')].
         Amlogic logs `DV: [.., bitdepth, FORMAT, ..]` in the kernel log each time a video starts; this is the
@@ -680,6 +713,14 @@ class TvPresence:
                                         (pkg, time.time() - 600)).fetchone()
                                     if row:
                                         db.set_video(self.atv_history.conn, row["id"], codec, w, h)
+                                for ts, codec, w, h in await asyncio.wait_for(
+                                        asyncio.to_thread(self.atv.resolution_events), 25):
+                                    row = self.atv_history.conn.execute(
+                                        "SELECT id, video_codec FROM sessions WHERE source='androidtv' AND started_at <= ?"
+                                        " AND (state='open' OR ended_at >= ?) ORDER BY id DESC LIMIT 1",
+                                        (ts + 90, ts - 5)).fetchone()
+                                    if row and w >= 320:
+                                        db.set_video(self.atv_history.conn, row["id"], row["video_codec"] or codec, w, h)
                                 for ts, fmt in await asyncio.wait_for(asyncio.to_thread(self.atv.hdr_events), 25):
                                     row = self.atv_history.conn.execute(
                                         "SELECT id FROM sessions WHERE source='androidtv' AND started_at <= ? AND"

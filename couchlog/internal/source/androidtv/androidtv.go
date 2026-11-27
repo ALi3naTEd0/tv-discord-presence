@@ -138,6 +138,9 @@ type reader struct {
 	videoApp   string
 	hdr        string // dynamic range of the content now playing
 	hdrLast    float64
+	res        *resEvent // picture size the driver decodes right now (adaptive streaming moves it)
+	resLast    float64
+	resApp     string // app the live size belongs to (the one playing when it was first applied)
 }
 
 const stateCmd = "dumpsys power | grep -m1 mWakefulness=; echo @@; " +
@@ -153,6 +156,19 @@ func (r *reader) read(c *adbConn, o *model.Observation) error {
 	if o.App.ID != "" && r.videoApp == o.App.ID && r.video != nil {
 		v := *r.video
 		o.Video = &v
+	}
+	if o.State == model.StatePlaying && r.res != nil && r.resApp != "" && r.resApp != o.App.ID {
+		r.res = nil // another app took over and has not logged a size of its own
+	}
+	if o.State == model.StatePlaying && r.res != nil {
+		r.resApp = o.App.ID
+		if o.Video == nil {
+			o.Video = &model.Video{Codec: r.res.codec}
+		}
+		if o.Video.Codec == "" {
+			o.Video.Codec = r.res.codec
+		}
+		o.Video.Width, o.Video.Height = r.res.width, r.res.height
 	}
 	if o.State == model.StatePlaying && r.hdr != "" {
 		if o.Video == nil {
@@ -170,6 +186,14 @@ func (r *reader) formats(c *adbConn) {
 			r.video, r.videoApp = &v, d.app
 		}
 		r.codecsRead = true
+	}
+	if out, err := c.Shell(`logcat -d -b kernel -v epoch | grep -E 'visible\(|video changed to' | tail -40`, 20*time.Second); err == nil {
+		var evs []resEvent
+		evs, r.resLast = parseRes(out, r.resLast)
+		if len(evs) > 0 {
+			e := evs[len(evs)-1]
+			r.res, r.resApp = &e, ""
+		}
 	}
 	if out, err := c.Shell(`logcat -d -b kernel -v epoch | grep 'DV: \[' | tail -20`, 20*time.Second); err == nil {
 		var evs []hdrEvent
@@ -338,6 +362,52 @@ func parseDecoders(out string, seen map[string]bool, first bool) []decoder {
 		res = append(res, decoder{app: app[1], codec: codec, width: w, height: h})
 	}
 	return res
+}
+
+var (
+	reResCodec   = regexp.MustCompile(`^\s*(\d+\.\d+).*\]\s+(\w+) video changed to`)
+	reResSize    = regexp.MustCompile(`^\s*(\d+\.\d+).*visible\((\d+) x (\d+)\)`)
+	kernelCodecs = map[string]string{"hevc": "HEVC", "h265": "HEVC", "av1": "AV1", "vp9": "VP9",
+		"h264": "H.264", "avc": "H.264", "mpeg2": "MPEG-2", "dv": "Dolby Vision"}
+)
+
+type resEvent struct {
+	at            float64
+	codec         string // "" when the driver did not name it just before
+	width, height int
+}
+
+// parseRes reads live picture sizes from the Amlogic video driver: it logs
+// `Parse from ucode, visible(W x H)` when a stream starts and every time
+// adaptive streaming switches quality (HBO goes 576p -> 1080p -> 4K in
+// seconds), while media.metrics only has a record once the decoder is released.
+func parseRes(out string, last float64) ([]resEvent, float64) {
+	var res []resEvent
+	codec, codecAt := "", 0.0
+	for _, line := range strings.Split(out, "\n") {
+		if m := reResCodec.FindStringSubmatch(line); m != nil {
+			codecAt, _ = strconv.ParseFloat(m[1], 64)
+			codec = kernelCodecs[strings.ToLower(m[2])]
+			continue
+		}
+		m := reResSize.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		at, _ := strconv.ParseFloat(m[1], 64)
+		w, _ := strconv.Atoi(m[2])
+		h, _ := strconv.Atoi(m[3])
+		if at <= last || w < 320 {
+			continue
+		}
+		last = at
+		e := resEvent{at: at, width: w, height: h}
+		if at-codecAt < 15 {
+			e.codec = codec
+		}
+		res = append(res, e)
+	}
+	return res, last
 }
 
 type hdrEvent struct {
