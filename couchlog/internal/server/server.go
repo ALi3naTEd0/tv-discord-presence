@@ -27,6 +27,7 @@ import (
 	"github.com/ALi3naTEd0/couchlog/internal/source/plex"
 	"github.com/ALi3naTEd0/couchlog/internal/source/webos"
 	"github.com/ALi3naTEd0/couchlog/internal/store"
+	"github.com/ALi3naTEd0/couchlog/internal/web"
 )
 
 // Server is a running Couchlog.
@@ -534,7 +535,7 @@ func (s *Server) splitNetflix(ctx context.Context, c *netflix.Client, viewed []n
 	return 1
 }
 
-// serveHTTP serves the dashboard's API on addr until ctx ends.
+// serveHTTP serves the dashboard and its API on addr until ctx ends.
 func (s *Server) serveHTTP(ctx context.Context, wg *sync.WaitGroup, addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -542,8 +543,11 @@ func (s *Server) serveHTTP(ctx context.Context, wg *sync.WaitGroup, addr string)
 	}
 	a := &api.API{Store: s.Store, Version: s.Version, Sinks: s.Config.Sinks, ReadOnly: s.Config.ReadOnly,
 		Log: s.Log.With("part", "api")}
-	hs := &http.Server{Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second}
-	s.Log.Info("dashboard API", "url", "http://"+ln.Addr().String()+"/api/v1/status")
+	mux := http.NewServeMux()
+	mux.Handle("/api/", a.Handler())
+	mux.Handle("/", web.Handler())
+	hs := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	s.Log.Info("dashboard", "url", "http://"+ln.Addr().String()+"/")
 	wg.Add(2)
 	go func() {
 		defer wg.Done()

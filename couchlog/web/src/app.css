@@ -1,0 +1,28 @@
+:root {
+  --bg: #0b0c0f;
+  --panel: #14161b;
+  --panel-line: #1f2229;
+  --row-line: #1c1f25;
+  --nav-active: #1b1d23;
+  --text: #f2f1ee;
+  --text-2: #c9cdd4;
+  --muted: #8a909a;
+  --accent: #f4b740;
+  --accent-soft: rgba(244, 183, 64, 0.16);
+  --live: #ff5a61;
+  --ok: #4ade80;
+  --sent-bg: #15233a;
+  --sent-fg: #8dbbff;
+  --font: 'Inter Variable', system-ui, sans-serif;
+  --display: 'Space Grotesk Variable', 'Inter Variable', sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); }
+body { -webkit-font-smoothing: antialiased; }
+a { color: var(--accent); }
+a:hover { color: #ffd27a; }
+h1, h2, h3 { font-family: var(--display); letter-spacing: -0.02em; }
+button { font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
