@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ALi3naTEd0/couchlog/internal/model"
@@ -424,4 +425,23 @@ func (s *Store) UndoNext(ctx context.Context, id int64) (*model.Session, error) 
 		return nil, fmt.Errorf("store: %w", err)
 	}
 	return s.Session(ctx, prev.Int64)
+}
+
+// OpenIn is the newest open session in one of these apps that started
+// before before, or nil.
+func (s *Store) OpenIn(ctx context.Context, appIDs []string, before time.Time) (*model.Session, error) {
+	if len(appIDs) == 0 {
+		return nil, nil
+	}
+	q := "SELECT " + sessionCols + " FROM sessions WHERE state = 'open' AND hidden <> 'ignored' AND started_at < ? AND app_id IN (?" +
+		strings.Repeat(",?", len(appIDs)-1) + ") ORDER BY id DESC LIMIT 1"
+	args := []any{ms(before)}
+	for _, a := range appIDs {
+		args = append(args, a)
+	}
+	sess, err := scanSession(s.db.QueryRowContext(ctx, q, args...))
+	if errors.Is(err, ErrNoSession) {
+		return nil, nil
+	}
+	return sess, err
 }

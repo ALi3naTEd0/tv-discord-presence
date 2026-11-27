@@ -39,6 +39,9 @@ type Server struct {
 	// Netflix session).
 	DataDir string
 
+	mu        sync.Mutex
+	splitDone map[string]bool // Netflix splits already made (session/entry)
+
 	// newSource builds a device's source; tests replace it.
 	newSource func(d config.Device, id int64) source.Source
 }
@@ -417,14 +420,18 @@ func (s *Server) netflixLoop(ctx context.Context, c *netflix.Client) {
 // with the viewing activity and identifies the ones it is sure about.
 func (s *Server) IdentifyNetflix(ctx context.Context, c *netflix.Client) (int, error) {
 	pending, err := s.Store.Unidentified(ctx, netflix.Apps, time.Now().AddDate(0, 0, -7))
-	if err != nil || len(pending) == 0 {
+	if err != nil {
+		return 0, err
+	}
+	open, err := s.Store.OpenIn(ctx, netflix.Apps, time.Now())
+	if err != nil || (len(pending) == 0 && open == nil) {
 		return 0, err
 	}
 	viewed, err := c.Activity(ctx, 0, 50)
 	if err != nil {
 		return 0, err
 	}
-	n := 0
+	n := s.splitNetflix(ctx, c, viewed)
 	pairs := netflix.Match(pending, viewed)
 	pairs = append(pairs, netflix.Continuations(pending, viewed, pairs, time.Now())...)
 	for _, p := range pairs {
@@ -464,4 +471,50 @@ func (s *Server) deliverLoop(ctx context.Context, d *deliver.Deliverer) {
 		case <-time.After(2 * time.Minute):
 		}
 	}
+}
+
+// splitNetflix: Netflix moved on to another title inside the session that
+// is playing (an autoplay the box did not show): its newest entry started
+// after the session did. The session is split there onto that title, as
+// the autoplay split would.
+func (s *Server) splitNetflix(ctx context.Context, c *netflix.Client, viewed []netflix.Viewed) int {
+	if len(viewed) == 0 {
+		return 0
+	}
+	newest := viewed[0]
+	for _, v := range viewed {
+		if v.DateMS > newest.DateMS {
+			newest = v
+		}
+	}
+	sess, err := s.Store.OpenIn(ctx, netflix.Apps, newest.Started().Add(-netflix.Window))
+	if err != nil || sess == nil {
+		return 0
+	}
+	key := fmt.Sprintf("%d/%d", sess.ID, newest.DateMS)
+	s.mu.Lock()
+	if s.splitDone == nil {
+		s.splitDone = map[string]bool{}
+	}
+	done := s.splitDone[key]
+	s.splitDone[key] = true
+	s.mu.Unlock()
+	if done {
+		return 0
+	}
+	items, err := s.Store.Items(ctx, sess.ID)
+	if err != nil || len(items) == 0 || items[len(items)-1].Kind != model.KindEpisode {
+		return 0 // a movie or an unidentified session: the usual rules handle it
+	}
+	it, err := netflix.Resolve(ctx, c, s.Ident, newest)
+	if err != nil || it == nil || items[len(items)-1].SameTitle(it.Identity) {
+		return 0
+	}
+	ns, err := s.Store.SplitNext(ctx, sess.ID, *it, s.Config.Sinks, time.Now())
+	if err != nil {
+		s.Log.Warn("Netflix split", "session", sess.ID, "err", err)
+		return 0
+	}
+	s.Log.Info("Netflix moved on to another title", "session", sess.ID, "new", ns.ID, "title", it.Title, "season", it.Season, "episode", it.Episode)
+	return 1
 }

@@ -1195,6 +1195,38 @@ def expected_seconds(items) -> float | None:
 
 
 REWATCH_WINDOW = 24 * 3600   # the same title again this soon: probably not a second viewing
+PARTS_WINDOW = 24 * 3600     # an episode picked up again within this is still the same viewing
+
+
+def _same_title_parts(conn, sess, it):
+    """Earlier sessions (same app, within PARTS_WINDOW) holding the same single title, never sent."""
+    return conn.execute(
+        "SELECT s.*, i.id AS item_id FROM sessions s JOIN items i ON i.session_id = s.id WHERE s.id <> ? AND s.app_id = ?"
+        " AND s.ignored = 0 AND s.started_at < ? AND s.started_at > ? AND i.kind = ?"
+        " AND COALESCE(i.season, -1) = COALESCE(?, -1) AND COALESCE(i.episode, -1) = COALESCE(?, -1)"
+        " AND ((i.tmdb IS NOT NULL AND i.tmdb = ?) OR (COALESCE(i.imdb, '') <> '' AND i.imdb = ?))"
+        " AND i.trakt_status NOT IN ('added', 'skipped') AND (SELECT COUNT(*) FROM items WHERE session_id = s.id) = 1",
+        (sess["id"], sess["app_id"], sess["started_at"], sess["started_at"] - PARTS_WINDOW, it["kind"],
+         it["season"], it["episode"], it["tmdb"], it["imdb"] or "")).fetchall()
+
+
+def furthest_before(conn, sess, it) -> float:
+    """Furthest real position reached in the earlier, unsent sessions of the same title."""
+    return max((p["position"] or 0 for p in _same_title_parts(conn, sess, it)), default=0)
+
+
+def absorb_parts(conn, sid: int) -> None:
+    """Once a session was sent, its earlier partial sessions of the same title are part of that
+    viewing: marked so, never sent on their own."""
+    sess = conn.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
+    items = conn.execute("SELECT * FROM items WHERE session_id=?", (sid,)).fetchall()
+    if not sess or len(items) != 1 or items[0]["trakt_status"] not in ("added",) and items[0]["simkl_status"] not in ("added",):
+        return
+    note = "Part of the viewing sent with the session at " + datetime.fromtimestamp(sess["started_at"]).strftime("%H:%M")
+    for p in _same_title_parts(conn, sess, items[0]):
+        conn.execute("UPDATE items SET trakt_status = CASE WHEN trakt_status IN ('pending','ready','error') THEN 'skipped' ELSE trakt_status END,"
+                     " simkl_status = CASE WHEN simkl_status IN ('pending','ready','error') THEN 'skipped' ELSE simkl_status END,"
+                     " trakt_error = ?, simkl_error = ? WHERE id = ?", (note, note, p["item_id"]))
 
 
 def seen_shortly_before(conn, sess, items):
@@ -1256,7 +1288,8 @@ def auto_push() -> None:
             # restarting the episode after coming back (same title within 6 h resumes the session) or
             # rewinding counted the same minutes twice.
             if sess["source"] == "androidtv" and sess["position"] and len(items) == 1:
-                watched = sess["position"]
+                # one episode picked up over several sessions is one viewing: the furthest point reached
+                watched = max(sess["position"], furthest_before(conn, sess, items[0]))
             else:
                 watched = max(sess["played_seconds"], sess["position"] or 0)
             ratio = watched / exp if exp else None
@@ -1272,6 +1305,8 @@ def auto_push() -> None:
         return
     api_verify(ready)              # marks what is already in your history as added
     r = api_push({"session_ids": ready})
+    for sid in ready:              # the earlier partial sessions of what was just sent are part of it
+        absorb_parts(conn, sid)
     sent = [x for x in r.get("results", []) if x.get("status") == "added"]
     if sent:
         print(f"Auto-sent: {', '.join(sorted({x['label'] + ' → ' + x['target'] for x in sent}))}", flush=True)
@@ -1708,6 +1743,39 @@ def netflix_matches(conn, activity: list) -> list:
 
 
 NETFLIX_LAST = {"at": 0.0}
+NETFLIX_SPLIT_DONE: set = set()   # (session id, entry date) already split
+
+
+def netflix_split_open(conn, newest) -> int:
+    """Netflix moved on to another title inside the session that is playing (autoplay the box
+    did not catch): a new entry started 5+ minutes after the session did. Split the session there,
+    onto that title, as the "next episode" button would."""
+    if not newest:
+        return 0
+    nd = newest["date"] / 1000
+    s = conn.execute("SELECT * FROM sessions WHERE app_id IN (?, ?) AND state = 'open' AND ignored = 0"
+                     " AND started_at < ? ORDER BY id DESC LIMIT 1", (*NETFLIX_APPS, nd - NETFLIX_WINDOW)).fetchone()
+    if not s or (s["id"], newest["date"]) in NETFLIX_SPLIT_DONE:
+        return 0
+    NETFLIX_SPLIT_DONE.add((s["id"], newest["date"]))
+    hit = netflix_resolve(newest)
+    if not hit:
+        return 0
+    kind, tid, season, episode = hit
+    cur = db.current_item(conn, s["id"])
+    if cur and cur["tmdb"] == tid and (kind == "movie" or (cur["season"], cur["episode"]) == (season, episode)):
+        return 0   # the session already is that title
+    if cur and cur["kind"] == "episode":
+        nxt = api_next(s["id"], auto=True)["session"]   # keeps the format, marks it as an automatic split
+    else:
+        return 0   # a movie or an unidentified session: left to the usual rules
+    body = {"kind": kind, "tmdb": tid}
+    if kind == "tv":
+        body.update(season=season, episodes=[episode])
+    api_identify(nxt, body)
+    conn.execute("UPDATE items SET auto_how='netflix' WHERE session_id=?", (nxt,))
+    print(f"Netflix: session {s['id']} moved on to {newest.get('title')} (session {nxt})", flush=True)
+    return 1
 
 
 def netflix_identify(force: bool = False) -> int:
@@ -1741,7 +1809,7 @@ def netflix_identify(force: bool = False) -> int:
                 (*NETFLIX_APPS, nd + NETFLIX_WINDOW, time.time() - 360)).fetchall():
             if s["id"] not in matched and s["started_at"] - nd <= 6 * 3600:
                 pairs.append((s, newest))
-    done = 0
+    done = netflix_split_open(conn, newest)
     for s, v in pairs:
         hit = netflix_resolve(v)
         if not hit:

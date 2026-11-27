@@ -17,6 +17,13 @@ type Activity struct {
 	State             string      `json:"state,omitempty"`
 	Timestamps        *Timestamps `json:"timestamps,omitempty"`
 	Assets            *Assets     `json:"assets,omitempty"`
+	Buttons           []Button    `json:"buttons,omitempty"` // up to two links others can open
+}
+
+// Button is a link under the status.
+type Button struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
 }
 
 // Timestamps make Discord show elapsed time, or a progress bar with End.
@@ -133,6 +140,9 @@ func Build(n *Now, now time.Time) *Activity {
 				where = n.App.Name + " · " + n.Device
 			}
 			a.Assets = &Assets{LargeImage: it.Poster, LargeText: clip(title), SmallImage: logo, SmallText: clip(where)}
+		}
+		if it.IMDb != "" {
+			a.Buttons = []Button{{Label: "IMDb", URL: "https://www.imdb.com/title/" + it.IMDb + "/"}}
 		}
 		// A progress bar only with a real position and a runtime that is not a guess.
 		if ts != nil && n.Position != nil && it.RuntimeMinutes > 0 && !it.RuntimeEstimated {

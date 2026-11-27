@@ -24,13 +24,16 @@ func dur(d time.Duration) *time.Duration { return &d }
 func TestBuildIdentifiedEpisode(t *testing.T) {
 	n := &Now{App: model.App{ID: "com.netflix.ninja", Name: "Netflix"}, State: model.StatePlaying, Position: dur(10 * time.Minute),
 		Item: &model.Item{Identity: model.Identity{Kind: model.KindEpisode, Title: "The Trials of Karen Read", Season: 1, Episode: 3,
-			EpisodeTitle: "The Evidence"}, Poster: "https://image.tmdb.org/p.jpg", RuntimeMinutes: 48}}
+			EpisodeTitle: "The Evidence", IMDb: "tt27723302"}, Poster: "https://image.tmdb.org/p.jpg", RuntimeMinutes: 48}}
 	a := Build(n, now)
 	if a.Type != 3 || a.Name != "Netflix" || a.Details != "The Trials of Karen Read" || a.State != "S1 · E3 — The Evidence" {
 		t.Errorf("%+v", a)
 	}
 	if a.Assets.LargeImage != "https://image.tmdb.org/p.jpg" || !strings.Contains(a.Assets.SmallImage, "netflix.com") || a.Assets.SmallText != "Netflix on TV" {
 		t.Errorf("assets %+v", a.Assets)
+	}
+	if len(a.Buttons) != 1 || a.Buttons[0].URL != "https://www.imdb.com/title/tt27723302/" {
+		t.Errorf("buttons %+v", a.Buttons)
 	}
 	if a.Timestamps.Start != now.Add(-10*time.Minute).Unix() || a.Timestamps.End != now.Add(38*time.Minute).Unix() {
 		t.Errorf("timestamps %+v (want a progress bar)", a.Timestamps)

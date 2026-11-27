@@ -84,10 +84,17 @@ func (d *Deliverer) Eligible(w store.Watch) (bool, string) {
 	}
 	watched := w.Session.Played
 	// With one title and a real position (Android TV) the furthest point is
-	// the measure: played time adds up every attempt and rewind.
+	// the measure: played time adds up every attempt and rewind. An episode
+	// picked up over several sessions is one viewing: its furthest point in
+	// any of them counts.
 	if w.Session.Position != nil {
 		if len(w.Items) == 1 && w.DeviceKind == "androidtv" {
 			watched = *w.Session.Position
+			for _, p := range d.parts(w) {
+				if p.Position > watched {
+					watched = p.Position
+				}
+			}
 		} else if *w.Session.Position > watched {
 			watched = *w.Session.Position
 		}
@@ -101,6 +108,30 @@ func (d *Deliverer) Eligible(w store.Watch) (bool, string) {
 		return false, fmt.Sprintf("Watched %d%% of the runtime (< %d%%): not sent automatically", int(ratio*100), int(min*100))
 	}
 	return true, ""
+}
+
+// PartsWindow is how long after an earlier session an episode picked up
+// again is still the same viewing.
+const PartsWindow = 24 * time.Hour
+
+func (d *Deliverer) parts(w store.Watch) []store.Part {
+	if d.Store == nil || w.Session == nil {
+		return nil
+	}
+	ps, _ := d.Store.Parts(context.Background(), w, PartsWindow)
+	return ps
+}
+
+// absorbParts marks the earlier partial sessions of a title just sent as
+// part of that viewing, never sent on their own.
+func (d *Deliverer) absorbParts(ctx context.Context, w store.Watch, sinkName string) {
+	if w.Session == nil {
+		return
+	}
+	note := "Part of the viewing sent with the session at " + w.Session.StartedAt.Local().Format("15:04")
+	for _, p := range d.parts(w) {
+		d.Store.SetDelivery(ctx, p.ItemID, sinkName, model.Skipped, note, d.now())
+	}
 }
 
 // Report counts what a run did, per destination.
@@ -133,6 +164,7 @@ func (d *Deliverer) Run(ctx context.Context) (Report, error) {
 func (d *Deliverer) runSink(ctx context.Context, sk sink.Sink, watches []store.Watch, rep Report) error {
 	name, now := sk.Name(), d.now()
 	var due []sink.Entry
+	watchOf := map[int64]store.Watch{}
 	rewatch := d.Rewatch
 	if rewatch == 0 {
 		rewatch = 24 * time.Hour
@@ -173,6 +205,7 @@ func (d *Deliverer) runSink(ctx context.Context, sk sink.Sink, watches []store.W
 				continue
 			}
 			due = append(due, sink.Entry{Item: it, WatchedAt: times[it.ID]})
+			watchOf[it.ID] = w
 		}
 	}
 	if len(due) > 0 {
@@ -202,6 +235,14 @@ func (d *Deliverer) runSink(ctx context.Context, sk sink.Sink, watches []store.W
 			for _, r := range res {
 				d.Store.SetDelivery(ctx, r.ItemID, name, r.Status, r.Error, d.now())
 				rep.add(name, r.Status)
+				if r.Status == model.Added {
+					d.absorbParts(ctx, watchOf[r.ItemID], name)
+				}
+			}
+		}
+		for i, r := range res { // already in your history counts as sent too
+			if r.Status == model.Added {
+				d.absorbParts(ctx, watchOf[due[i].Item.ID], name)
 			}
 		}
 	}

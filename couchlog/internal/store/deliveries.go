@@ -196,3 +196,46 @@ func episodeOrNone(it model.Item) int {
 	}
 	return it.Episode
 }
+
+// Part is an earlier, unsent session of the same single title.
+type Part struct {
+	SessionID, ItemID int64
+	Position          time.Duration
+}
+
+// Parts lists the earlier sessions (same app, within window) holding only
+// the same title as w, not sent anywhere: an episode picked up again over
+// several sessions is one viewing.
+func (s *Store) Parts(ctx context.Context, w Watch, window time.Duration) ([]Part, error) {
+	if len(w.Items) != 1 {
+		return nil, nil
+	}
+	it := w.Items[0]
+	if it.TMDB == 0 && it.IMDb == "" {
+		return nil, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT s.id, i.id, COALESCE(s.position_ms, 0) FROM sessions s
+		JOIN items i ON i.session_id = s.id AND i.replaced_at IS NULL
+		WHERE s.id <> ? AND s.app_id = ? AND s.hidden <> 'ignored' AND s.started_at < ? AND s.started_at > ?
+		AND i.kind = ? AND COALESCE(i.season, -1) = ? AND COALESCE(i.episode, -1) = ?
+		AND ((i.tmdb IS NOT NULL AND i.tmdb = ?) OR (i.imdb <> '' AND i.imdb = ?))
+		AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.item_id = i.id AND d.status IN ('added', 'skipped'))
+		AND (SELECT COUNT(*) FROM items WHERE session_id = s.id AND replaced_at IS NULL) = 1`,
+		w.Session.ID, w.Session.App.ID, ms(w.Session.StartedAt), ms(w.Session.StartedAt.Add(-window)),
+		string(it.Kind), seasonOrNone(it), episodeOrNone(it), it.TMDB, it.IMDb)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer rows.Close()
+	var out []Part
+	for rows.Next() {
+		var p Part
+		var pos int64
+		if err := rows.Scan(&p.SessionID, &p.ItemID, &pos); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+		p.Position = time.Duration(pos) * time.Millisecond
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

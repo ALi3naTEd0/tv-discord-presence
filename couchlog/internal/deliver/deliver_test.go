@@ -211,7 +211,32 @@ func TestUnsentStartDoesNotHoldTheViewing(t *testing.T) {
 	its, _ := r.st.Items(r.ctx, s.ID)
 	m := &memSink{has: map[int]bool{}}
 	(&Deliverer{Store: r.st, Sinks: []sink.Sink{m}}).Run(r.ctx)
-	if r.status(its[0].ID) != model.Added || r.status(start) != model.Pending {
+	// The minute is part of that viewing: marked, never sent on its own.
+	if r.status(its[0].ID) != model.Added || r.status(start) != model.Skipped {
 		t.Errorf("viewing=%s start=%s", r.status(its[0].ID), r.status(start))
+	}
+}
+
+// An episode picked up over three sessions (30, 60, then 95 % reached):
+// sent once, with the last session; the earlier parts are marked, not sent.
+func TestPickedUpOverSessionsIsOneViewing(t *testing.T) {
+	r := newRig(t)
+	part := func(startMin, posSec int) int64 {
+		s, _ := r.st.StartSession(r.ctx, r.box, model.App{ID: "com.netflix.ninja"}, "", t0.Add(time.Duration(startMin)*time.Minute))
+		r.st.Touch(r.ctx, s.ID, s.StartedAt.Add(10*time.Minute), 10*time.Minute, true)
+		r.st.SetPosition(r.ctx, s.ID, time.Duration(posSec)*time.Second)
+		r.st.CloseSession(r.ctx, s.ID, 0, 0)
+		r.st.Identify(r.ctx, s.ID, []model.Item{{Identity: model.Identity{Kind: model.KindEpisode, Title: "s", TMDB: 9, Season: 1, Episode: 2}, RuntimeMinutes: 51}}, []string{"trakt"}, t0)
+		its, _ := r.st.Items(r.ctx, s.ID)
+		return its[0].ID
+	}
+	a, b, c := part(0, 900), part(30, 1800), part(60, 2919)
+	m := &memSink{has: map[int]bool{}}
+	(&Deliverer{Store: r.st, Sinks: []sink.Sink{m}}).Run(r.ctx)
+	if len(m.pushed) != 1 || m.pushed[0] != c {
+		t.Fatalf("pushed %v, want only the last part", m.pushed)
+	}
+	if r.status(a) != model.Skipped || r.status(b) != model.Skipped {
+		t.Errorf("parts a=%s b=%s", r.status(a), r.status(b))
 	}
 }

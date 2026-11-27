@@ -130,6 +130,8 @@ type Tracker struct {
 	// OnEvent, if set, is called for every session change.
 	OnEvent func(Event)
 
+	startPos map[int64]time.Duration // session -> first real position seen in it
+
 	lastMu   sync.Mutex
 	lastObs  model.Observation
 	lastSess *model.Session
@@ -278,6 +280,14 @@ func (t *Tracker) observe(ctx context.Context, o model.Observation) (*model.Sess
 			return nil, err
 		}
 	}
+	if o.Position != nil {
+		if t.startPos == nil {
+			t.startPos = map[int64]time.Duration{}
+		}
+		if _, ok := t.startPos[sess.ID]; !ok {
+			t.startPos[sess.ID] = *o.Position // where this session picked the title up
+		}
+	}
 	if playing && o.Position != nil && sess.LivePosition != nil && t.Next != nil {
 		if next := t.autoplay(ctx, sess, *sess.LivePosition, *o.Position, now); next != nil {
 			sess = next
@@ -343,7 +353,10 @@ func (t *Tracker) autoplay(ctx context.Context, sess *model.Session, prev, pos t
 	// Real watching, not a skip to the end: Netflix can jump back to an
 	// earlier episode while you are away, and seeking that one to its end
 	// must not look like this episode finishing.
-	if sess.Played < runtime/2 {
+	// Picking the episode up again counts: the position went from where this
+	// session started to the end by playing, not by seeking.
+	continuous := prev-t.startPos[sess.ID] <= sess.Played*5/4+time.Minute
+	if sess.Played < runtime/2 && !continuous {
 		t.log.Info("position jumped back but little was played: not the next episode",
 			"session", sess.ID, "from", prev, "to", pos, "played", sess.Played)
 		return nil

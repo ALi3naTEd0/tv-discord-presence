@@ -301,6 +301,7 @@ class HistoryRecorder:
         self._prev_playing = False
         self._idle_since: float | None = None
         self._left_player = False  # the app is in front but has no media (in its menu)
+        self._start_pos: dict = {}  # session id -> first real position seen in it
 
     def _close(self, sess, why: str) -> None:
         db.close_session(self.conn, sess["id"], self.min_seconds, min_by_app=self.min_by_app)
@@ -320,8 +321,11 @@ class HistoryRecorder:
         if not it or it["kind"] != "episode" or not it["runtime"] or it["runtime_est"] or prev < 0.8 * it["runtime"] * 60:
             return None
         # Real watching, not a skip to the end: Netflix can jump back to an earlier episode while you are away,
-        # and seeking that one to its end must not look like this episode finishing
-        if sess["played_seconds"] < 0.5 * it["runtime"] * 60:
+        # and seeking that one to its end must not look like this episode finishing. Picking the episode up
+        # again counts: the position went from where this session started to the end by playing, not seeking.
+        start_pos = self._start_pos.get(sess["id"], 0.0)
+        continuous = prev - start_pos <= sess["played_seconds"] * 1.25 + 60
+        if sess["played_seconds"] < 0.5 * it["runtime"] * 60 and not continuous:
             log.info("History[%s]: position jumped %.0f → %.0f s but only %.0f s played: not treated as the next episode",
                      self.source, prev, pos, sess["played_seconds"])
             return None
@@ -390,6 +394,8 @@ class HistoryRecorder:
             self._prev_playing = False  # the previous interval was not playback
         if hint and hint[0] and not sess["hint_title"]:
             db.set_hint(self.conn, sess["id"], *hint)
+        if pos is not None:
+            self._start_pos.setdefault(sess["id"], pos)   # where this session picked the title up
         if pos is not None and playing and self.source == "androidtv":
             sess = self._autoplay_next(sess, pos) or sess
         if pos is not None:
@@ -608,7 +614,11 @@ class TvPresence:
         if paused:
             line = f"Paused · {line}"
         poster = ident["poster"]
+        imdb = ident["imdb"] if "imdb" in ident.keys() else None
+        # A link to the title on IMDb under the status (Discord shows it as a button to others)
+        buttons = [{"label": "IMDb", "url": f"https://www.imdb.com/title/{imdb}/"}] if imdb else None
         await self.rpc.update(
+            buttons=buttons,
             activity_type=ActivityType.WATCHING,
             status_display_type=StatusDisplayType.DETAILS,
             name=name,
@@ -709,6 +719,7 @@ class TvPresence:
                         ident = {"id": "plex", "kind": p.get("kind"), "title": p["title"], "year": p.get("year"),
                                  "season": p.get("season"), "episode": p.get("episode"),
                                  "episode_title": p.get("episode_title"), "poster": p.get("poster"),
+                                 "imdb": (p.get("ids") or {}).get("imdb"),
                                  "runtime": (p.get("duration") or 0) / 60 or None, "runtime_est": 0,
                                  "device": p.get("device")}
                         hint, pos, played = None, p.get("offset"), None

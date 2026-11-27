@@ -130,3 +130,17 @@ func TestAutoplayWithoutNextEpisodeKeepsSession(t *testing.T) {
 		t.Error("session closed although the split failed")
 	}
 }
+
+// The episode picked up again near its end (an earlier session had most of
+// it): playing on to the next episode still splits.
+func TestAutoplayAfterPickingUpAgain(t *testing.T) {
+	r := autoplayRig(t)
+	s := r.playPos(0, 60, 1500) // resumes at 25 min of a 30 min episode
+	r.identify(s.ID, episode(1, 30, false))
+	r.playPos(65, 300, 1565) // plays on to ~29:55
+	r.playPos(305, 400, 5)   // the next one starts
+	ss := r.wantSessions(2)
+	if ss[1].AutoNextFrom == nil {
+		t.Error("no split after picking the episode up again")
+	}
+}
