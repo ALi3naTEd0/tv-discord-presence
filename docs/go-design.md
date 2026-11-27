@@ -272,10 +272,10 @@ with the exact start time of each title (only the latest viewing per title).
 Couchlog reads it with the user's Netflix session through Netflix's internal
 web API (as Universal Trakt Scrobbler does), matches each title to the TV
 session that started within 5 min (a session with no entry of its own,
-10+ minutes in, is the newest entry's title when that entry is from the
+6+ minutes in, is the newest entry's title when that entry is from the
 last 6 h: picking a title up again adds no entry), and identifies it through TMDB with
 Netflix's English titles and real season/episode numbers
-(`internal/netflix`; the server runs it every 10 min while Netflix sessions
+(`internal/netflix`; the server runs it every 2 min while Netflix sessions
 from the last week wait, with `netflix = true` in the settings).
 
 Getting the session, universally, in the same binary (no extension, no

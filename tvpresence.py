@@ -673,7 +673,10 @@ class TvPresence:
                                 for ts, fmt in await asyncio.wait_for(asyncio.to_thread(self.atv.hdr_events), 25):
                                     row = self.atv_history.conn.execute(
                                         "SELECT id FROM sessions WHERE source='androidtv' AND started_at <= ? AND"
-                                        " (state='open' OR ended_at >= ?) ORDER BY id DESC LIMIT 1", (ts + 5, ts - 5)).fetchone()
+                                        " (state='open' OR ended_at >= ?) ORDER BY id DESC LIMIT 1",
+                                        # the box logs the format when the decoder starts, while the app is
+                                        # still buffering: up to 90 s before the session counts as playing
+                                        (ts + 90, ts - 5)).fetchone()
                                     if row:
                                         db.set_hdr(self.atv_history.conn, row["id"], fmt, ts)
                                     self._box_video(ts, fmt, atv_info[0] if atv_info else None)

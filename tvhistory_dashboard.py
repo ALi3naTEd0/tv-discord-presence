@@ -1711,9 +1711,9 @@ NETFLIX_LAST = {"at": 0.0}
 
 
 def netflix_identify(force: bool = False) -> int:
-    """Identify Netflix sessions from your account's viewing activity (every 10 min, only while
+    """Identify Netflix sessions from your account's viewing activity (every 2 min, only while
     there are unidentified Netflix sessions from the last 7 days)."""
-    if not force and time.time() - NETFLIX_LAST["at"] < 600:
+    if not force and time.time() - NETFLIX_LAST["at"] < 110:   # each auto-loop round (2 min) while some wait
         return 0
     conn = db.connect()
     pending = conn.execute("SELECT COUNT(*) FROM sessions WHERE app_id IN (?, ?) AND ignored = 0 AND started_at > ?"
@@ -1729,7 +1729,7 @@ def netflix_identify(force: bool = False) -> int:
     NETFLIX_LAST["at"] = time.time()
     pairs = netflix_matches(conn, activity)
     # Netflix keeps one entry per title, with when you started it: picking it up again (or restarting
-    # it) adds no new entry. A session with no entry of its own, 10+ minutes in, while the newest entry
+    # it) adds no new entry. A session with no entry of its own, 6+ minutes in, while the newest entry
     # is from before it (within 6 h), is that same title: a new title would have its own entry by now.
     matched = {s["id"] for s, _ in pairs}
     newest = max(activity, key=lambda v: v.get("date", 0), default=None)
@@ -1738,7 +1738,7 @@ def netflix_identify(force: bool = False) -> int:
         for s in conn.execute(
                 "SELECT * FROM sessions WHERE app_id IN (?, ?) AND ignored = 0 AND started_at > ? AND started_at < ?"
                 " AND id NOT IN (SELECT session_id FROM items) ORDER BY started_at",
-                (*NETFLIX_APPS, nd + NETFLIX_WINDOW, time.time() - 600)).fetchall():
+                (*NETFLIX_APPS, nd + NETFLIX_WINDOW, time.time() - 360)).fetchall():
             if s["id"] not in matched and s["started_at"] - nd <= 6 * 3600:
                 pairs.append((s, newest))
     done = 0

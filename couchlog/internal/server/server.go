@@ -396,7 +396,8 @@ func (s *Server) FillPosters(ctx context.Context, tried map[int64]time.Time) (in
 }
 
 // netflixLoop identifies Netflix sessions from the account's viewing
-// activity every ten minutes, only while some from the last week wait.
+// activity every two minutes, asking Netflix only while some from the last
+// week wait (one request; titles' metadata is cached).
 func (s *Server) netflixLoop(ctx context.Context, c *netflix.Client) {
 	for {
 		if n, err := s.IdentifyNetflix(ctx, c); err != nil {
@@ -407,7 +408,7 @@ func (s *Server) netflixLoop(ctx context.Context, c *netflix.Client) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(10 * time.Minute):
+		case <-time.After(2 * time.Minute):
 		}
 	}
 }
