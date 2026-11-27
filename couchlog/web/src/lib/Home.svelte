@@ -36,6 +36,12 @@
 
 <NowPlaying session={playing} sinks={app.status?.sinks ?? []} />
 <div class="content">
+  {#if app.status && !app.status.devices.some(d => d.kind !== 'plex')}
+    <a class="setup" href="#/setup">
+      <b>Connect your first TV</b>
+      <span>Couchlog finds the TVs and boxes on your network; you accept on the TV and it starts recording.</span>
+    </a>
+  {/if}
   <UpNext items={next} />
   <div class="cols">
     <div class="main"><Today sessions={todays} /></div>
@@ -85,6 +91,9 @@
 
 <style>
   .content { padding: 36px 40px 56px; max-width: 1200px; width: 100%; margin: 0 auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px; }
+  .setup { display: flex; flex-direction: column; gap: 4px; padding: 20px 22px; border-radius: 16px; background: #1b1810;
+    border: 1px solid #3a3018; text-decoration: none; color: #e6dcc2; font-size: 14px; }
+  .setup b { color: var(--accent); font-size: 18px; font-family: var(--display); }
   .cols { display: flex; flex-wrap: wrap; gap: 28px; }
   .main { flex: 999 1 460px; min-width: 0; }
   aside { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }

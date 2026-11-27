@@ -3,8 +3,8 @@
 import { api, type Session, type Status } from './api'
 import { syncClock } from './clock.svelte'
 
-export type Route = 'home' | 'history' | 'insights' | 'services' | 'about'
-const ROUTES: Route[] = ['home', 'history', 'insights', 'services', 'about']
+export type Route = 'home' | 'history' | 'insights' | 'services' | 'about' | 'setup'
+const ROUTES: Route[] = ['home', 'history', 'insights', 'services', 'about', 'setup']
 
 function parse(): Route {
   const r = location.hash.replace(/^#\/?/, '') as Route

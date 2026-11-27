@@ -129,3 +129,43 @@ type posterCatalog struct{ catalog }
 func (posterCatalog) Get(_ context.Context, k identify.Kind, id int) (identify.Title, error) {
 	return identify.Title{Kind: k, TMDB: id, Title: "Ozark", Poster: "https://image.tmdb.org/t/p/w342/ozark.jpg"}, nil
 }
+
+func TestAddDeviceWhileRunning(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dir := t.TempDir()
+	st, err := store.Open(ctx, filepath.Join(dir, "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	src := &script{obs: []model.Observation{{At: time.Now(), State: model.StateIdle, App: model.App{ID: "launcher"}}}, done: make(chan struct{})}
+	cfgPath := filepath.Join(dir, "config.toml")
+	s := &Server{Config: &config.Config{Listen: "off"}, Store: st, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		DataDir: dir, ConfigPath: cfgPath, newSource: func(config.Device, int64) source.Source { return src }}
+	go s.Run(ctx)
+	deadline := time.Now().Add(3 * time.Second)
+	for !s.running() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	id, err := s.AddDevice(ctx, "webos", "192.168.1.50", "Living room")
+	if err != nil || id == 0 {
+		t.Fatalf("add: %d %v", id, err)
+	}
+	if _, err := s.AddDevice(ctx, "webos", "192.168.1.50", "Again"); err == nil {
+		t.Error("the same host added twice")
+	}
+	if _, err := s.AddDevice(ctx, "roku", "192.168.1.51", ""); err == nil {
+		t.Error("unknown kind accepted")
+	}
+	<-src.done
+	time.Sleep(100 * time.Millisecond)
+	if st := s.DeviceStates()[id]; st.State != "idle" {
+		t.Errorf("state %+v", st)
+	}
+	saved, err := config.Load(cfgPath)
+	if err != nil || len(saved.Devices) != 1 || saved.Devices[0].Name != "Living room" ||
+		saved.Devices[0].KeyFile != filepath.Join(dir, "webos-192.168.1.50.key") {
+		t.Errorf("saved %+v %v", saved, err)
+	}
+}

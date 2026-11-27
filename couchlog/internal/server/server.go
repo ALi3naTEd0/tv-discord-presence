@@ -49,6 +49,13 @@ type Server struct {
 	mu        sync.Mutex
 	splitDone map[string]bool // Netflix splits already made (session/entry)
 	nf        *netflix.Client // the Netflix connection, when Netflix is on
+	trackers  []deviceTracker // one per TV or box, guarded by mu
+	runCtx    context.Context
+	wg        *sync.WaitGroup
+	// ConfigPath is the settings file, rewritten when a device is added
+	// from the dashboard; "" = devices added there last until a restart.
+	ConfigPath string
+	connect    connectState // Connect Netflix from the dashboard
 
 	// newSource builds a device's source; tests replace it.
 	newSource func(d config.Device, id int64) source.Source
@@ -87,29 +94,15 @@ func (s *Server) source(d config.Device, id int64) source.Source {
 // Run listens to every device and imports Plex until ctx ends.
 func (s *Server) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
-	var trackers []deviceTracker
 	var plexClient *plex.Client
-	for _, d := range s.Config.Devices {
-		id, err := s.Store.EnsureDevice(ctx, store.LocalUserID, d.Kind, d.Name, d.Host)
-		if err != nil {
+	s.mu.Lock()
+	s.runCtx, s.wg = ctx, &wg
+	devices := append([]config.Device(nil), s.Config.Devices...)
+	s.mu.Unlock()
+	for _, d := range devices {
+		if err := s.startDevice(ctx, &wg, d); err != nil {
 			return err
 		}
-		tr, err := engine.NewTracker(ctx, s.Store, engine.Device{ID: id, TitleMediaIDs: d.Kind == "androidtv"},
-			engine.Config{}, time.Now(), s.Log.With("device", d.Name))
-		if err != nil {
-			return err
-		}
-		tr.Sinks = s.Config.Sinks
-		if s.Ident != nil {
-			tr.Next = s.Ident.Next
-		}
-		trackers = append(trackers, deviceTracker{kind: d.Kind, tr: tr})
-		src := s.source(d, id)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			s.follow(ctx, d.Name, src, tr)
-		}()
 	}
 	if s.Ident != nil {
 		wg.Add(2)
@@ -189,7 +182,7 @@ func (s *Server) Run(ctx context.Context) error {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				s.presenceLoop(ctx, r, trackers, plexClient)
+				s.presenceLoop(ctx, r, plexClient)
 			}()
 		}
 	}
@@ -198,8 +191,11 @@ func (s *Server) Run(ctx context.Context) error {
 }
 
 type deviceTracker struct {
-	kind string
-	tr   *engine.Tracker
+	id      int64
+	kind    string
+	name    string
+	keyFile string
+	tr      *engine.Tracker
 }
 
 // notShownOnTV are apps the TV status skips: music, and Plex, which shows
@@ -209,10 +205,12 @@ var notShownOnTV = map[string]bool{"com.plexapp.android": true, "com.spotify.tv.
 
 // presenceLoop updates the Discord status every five seconds: the LG's own
 // app first, then the box, then Plex on any device.
-func (s *Server) presenceLoop(ctx context.Context, r *presence.Runner, trackers []deviceTracker, px *plex.Client) {
+func (s *Server) presenceLoop(ctx context.Context, r *presence.Runner, px *plex.Client) {
 	defer r.Close()
-	order := append(append([]deviceTracker{}, filterKind(trackers, "webos")...), filterKind(trackers, "androidtv")...)
 	for {
+		// read each time: devices added from the dashboard join without a restart
+		trackers := s.deviceTrackers()
+		order := append(append([]deviceTracker{}, filterKind(trackers, "webos")...), filterKind(trackers, "androidtv")...)
 		r.Show(s.nowPlaying(ctx, order, px), time.Now())
 		select {
 		case <-ctx.Done():
@@ -580,6 +578,8 @@ func (s *Server) serveHTTP(ctx context.Context, wg *sync.WaitGroup, addr string)
 	}
 	a := &api.API{Store: s.Store, Ident: s.Ident, Version: s.Version, Sinks: s.Config.Sinks, ReadOnly: s.Config.ReadOnly,
 		Presence: s.Config.Presence, Log: s.Log.With("part", "api")}
+	a.Devices = api.DeviceHooks{States: s.DeviceStates, Scan: s.Scan, Add: s.AddDevice,
+		ConnectNetflix: s.ConnectNetflix, NetflixStatus: s.NetflixStatus}
 	if nf := s.nf; nf != nil {
 		a.NetflixProfile = func(ctx context.Context) (string, error) {
 			p, err := nf.Profile(ctx)

@@ -4,7 +4,13 @@
   import Logo from './Logo.svelte'
 
   const count = $derived(toIdentify(app.history).length)
-  const deviceState = (id: number) => (app.now.some(s => s.device.id === id) ? 'Playing' : '')
+  const STATE: Record<string, string> = { playing: 'Playing', paused: 'Paused', idle: 'On', off: 'Off', waiting: 'Not connected' }
+  function deviceState(id: number) {
+    const d = app.status?.devices.find(x => x.id === id)
+    if (d?.state) return STATE[d.state.state] ?? ''
+    return app.now.some(s => s.device.id === id) ? 'Playing' : ''
+  }
+  const dotClass = (id: number) => app.status?.devices.find(x => x.id === id)?.state?.state ?? (app.now.some(s => s.device.id === id) ? 'playing' : '')
   const links: { r: Route; label: string; icon: string }[] = [
     { r: 'home', label: 'Home', icon: 'M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z' },
     { r: 'history', label: 'History', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2' },
@@ -41,11 +47,12 @@
       <div class="label">Devices</div>
       {#each app.status.devices as d (d.id)}
         <div class="dev">
-          <span class="dot" class:on={deviceState(d.id)}></span>
+          <span class="dot {dotClass(d.id)}"></span>
           <span class="grow">{d.name}</span>
           <span class="state">{deviceState(d.id)}</span>
         </div>
       {/each}
+      <a class="add" href="#/setup">+ Add a TV or box</a>
       {#if app.status.sinks.length || app.status.discord !== 'off'}
         <div class="label">Sends to</div>
         {#each app.status.sinks as k (k)}
@@ -84,7 +91,11 @@
   .dev { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 12px; font-size: 14px; color: var(--text-2); }
   .grow { flex: 1; }
   .dot { width: 8px; height: 8px; border-radius: 4px; background: #4b505a; }
-  .dot.on { background: var(--ok); }
+  .dot.playing, .dot.paused { background: var(--ok); }
+  .dot.idle { background: #6ea8fe; }
+  .dot.waiting { background: var(--accent); }
+  .add { padding: 6px 12px; font-size: 13px; color: var(--muted); text-decoration: none; }
+  .add:hover { color: var(--accent); }
   .state { font-size: 12px; color: var(--muted); }
   .ver { margin-top: auto; padding: 24px 12px 0; font-size: 11px; color: #5b616c; text-decoration: none; }
   .ver:hover, .ver.on { color: var(--text-2); }

@@ -31,6 +31,7 @@ type API struct {
 	// NetflixProfile names the profile of Couchlog's Netflix connection;
 	// nil when Netflix is not connected.
 	NetflixProfile func(ctx context.Context) (string, error)
+	Devices        DeviceHooks
 	Log            *slog.Logger
 	Now            func() time.Time // tests set it
 }
@@ -59,6 +60,10 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/services", a.services)
 	mux.HandleFunc("PUT /api/v1/services/{key}", a.putService)
 	mux.HandleFunc("PUT /api/v1/settings/{key}", a.putSetting)
+	mux.HandleFunc("GET /api/v1/setup/scan", a.scan)
+	mux.HandleFunc("POST /api/v1/setup/devices", a.addDevice)
+	mux.HandleFunc("GET /api/v1/netflix", a.netflixStatus)
+	mux.HandleFunc("POST /api/v1/netflix/connect", a.connectNetflix)
 	mux.HandleFunc("GET /api/v1/export/letterboxd.csv", a.letterboxd)
 	mux.HandleFunc("GET /api/v1/export/history.csv", a.historyCSV)
 	return mux
@@ -79,9 +84,10 @@ type Status struct {
 
 // Device is a TV, box or server.
 type Device struct {
-	ID   int64  `json:"id"`
-	Kind string `json:"kind"`
-	Name string `json:"name"`
+	ID    int64        `json:"id"`
+	Kind  string       `json:"kind"`
+	Name  string       `json:"name"`
+	State *DeviceState `json:"state,omitempty"` // TVs and boxes being listened to
 }
 
 func (a *API) status(w http.ResponseWriter, r *http.Request) {
@@ -98,8 +104,16 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 	if st.Sinks == nil {
 		st.Sinks = []string{}
 	}
+	var states map[int64]DeviceState
+	if a.Devices.States != nil {
+		states = a.Devices.States()
+	}
 	for _, d := range devs {
-		st.Devices = append(st.Devices, Device{ID: d.ID, Kind: d.Kind, Name: d.Name})
+		dv := Device{ID: d.ID, Kind: d.Kind, Name: d.Name}
+		if x, ok := states[d.ID]; ok {
+			dv.State = &x
+		}
+		st.Devices = append(st.Devices, dv)
 	}
 	sort.Slice(st.Devices, func(i, j int) bool { return st.Devices[i].ID < st.Devices[j].ID })
 	writeJSON(w, st)

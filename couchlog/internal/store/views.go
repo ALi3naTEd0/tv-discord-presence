@@ -169,3 +169,22 @@ func (s *Store) UnidentifiedWithHint(ctx context.Context, userID int64, since ti
 	}
 	return out, rows.Err()
 }
+
+// DevicesWithSessions returns the ids of devices that have recorded at
+// least one session (so they were connected and paired at some point).
+func (s *Store) DevicesWithSessions(ctx context.Context) (map[int64]bool, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT DISTINCT device_id FROM sessions")
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}

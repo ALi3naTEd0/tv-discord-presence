@@ -57,10 +57,15 @@ export interface Status {
   server_time: string
   sinks: string[]
   read_only: boolean
-  devices: { id: number; kind: string; name: string }[]
+  devices: DeviceInfo[]
   identify: boolean
   discord: 'on' | 'dry-run' | 'off'
 }
+
+export interface DeviceState { state: 'playing' | 'paused' | 'idle' | 'off' | 'waiting'; since?: string; app?: string }
+export interface DeviceInfo { id: number; kind: string; name: string; state?: DeviceState }
+export interface FoundDevice { kind: 'webos' | 'androidtv'; name: string; host: string; model?: string; adb: boolean; added_as?: string }
+export interface NetflixStatus { enabled: boolean; saved: boolean; saved_at?: string; profile?: string; connecting: boolean; message?: string; error?: string }
 
 export interface ServiceInfo { key: string; name: string; free?: 'library' | 'free' | 'ads' }
 export interface Price { amount: number; currency: string; period: 'month' | 'year'; monthly: number }
@@ -127,5 +132,9 @@ export const api = {
   setPrice: (key: string, price: number, currency: string, period: string) =>
     call<Services>('PUT', `/api/v1/services/${encodeURIComponent(key)}`, { price, currency, period }),
   setCurrency: (value: string) => call<void>('PUT', '/api/v1/settings/currency', { value }),
+  scan: () => get<FoundDevice[]>('/api/v1/setup/scan'),
+  addDevice: (kind: string, host: string, name: string) => call<{ id: number }>('POST', '/api/v1/setup/devices', { kind, host, name }),
+  netflix: () => get<NetflixStatus>('/api/v1/netflix'),
+  connectNetflix: () => call<NetflixStatus>('POST', '/api/v1/netflix/connect', {}),
   setProfile: (key: string, value: string) => call<void>('PUT', `/api/v1/settings/profile:${encodeURIComponent(key)}`, { value }),
 }

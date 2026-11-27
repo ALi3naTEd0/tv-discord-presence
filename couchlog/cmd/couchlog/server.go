@@ -105,6 +105,7 @@ func serverCmd(ctx context.Context, args []string, stderr io.Writer) error {
 	srv := server.New(cfg, st, log)
 	srv.DataDir = filepath.Dir(dbPath)
 	srv.Version = version
+	srv.ConfigPath = *cfgPath
 	return srv.Run(ctx)
 }
 

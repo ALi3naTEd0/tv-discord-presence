@@ -7,6 +7,7 @@
   import Nav from './lib/Nav.svelte'
   import Services from './lib/Services.svelte'
   import About from './lib/About.svelte'
+  import Setup from './lib/Setup.svelte'
   import { app, loadHistory, loadNow, loadStatus } from './lib/store.svelte'
 
   onMount(() => {
@@ -14,7 +15,7 @@
     const timers = [setInterval(loadNow, 5000), setInterval(loadHistory, 30000), setInterval(loadStatus, 60000)]
     return () => timers.forEach(clearInterval)
   })
-  const titles = { home: 'Couchlog', history: 'History · Couchlog', insights: 'Insights · Couchlog', services: 'Your services · Couchlog', about: 'About · Couchlog' }
+  const titles = { home: 'Couchlog', history: 'History · Couchlog', insights: 'Insights · Couchlog', services: 'Your services · Couchlog', about: 'About · Couchlog', setup: 'Set up · Couchlog' }
   $effect(() => { document.title = titles[app.route] })
 </script>
 
@@ -26,6 +27,7 @@
     {:else if app.route === 'insights'}<Insights />
     {:else if app.route === 'services'}<Services />
     {:else if app.route === 'about'}<About />
+    {:else if app.route === 'setup'}<Setup />
     {:else}<Home />{/if}
   </main>
 </div>
