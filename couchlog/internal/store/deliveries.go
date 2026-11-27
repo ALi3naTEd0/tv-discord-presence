@@ -239,3 +239,24 @@ func (s *Store) Parts(ctx context.Context, w Watch, window time.Duration) ([]Par
 	}
 	return out, rows.Err()
 }
+
+// EnsureDeliveries gives every current item of the sessions started after
+// since a pending delivery for each sink it has none for: items recorded
+// before a destination was set up (Plex imported first, Trakt added later)
+// would otherwise never be checked or sent. It returns how many it added.
+func (s *Store) EnsureDeliveries(ctx context.Context, sinks []string, since, now time.Time) (int64, error) {
+	var total int64
+	for _, sk := range sinks {
+		res, err := s.db.ExecContext(ctx, `INSERT INTO deliveries(item_id, sink, status, updated_at)
+			SELECT i.id, ?, 'pending', ? FROM items i JOIN sessions s ON s.id = i.session_id
+			WHERE i.replaced_at IS NULL AND s.started_at > ?
+			AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.item_id = i.id AND d.sink = ?)`,
+			sk, ms(now), ms(since), sk)
+		if err != nil {
+			return total, fmt.Errorf("store: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		total += n
+	}
+	return total, nil
+}

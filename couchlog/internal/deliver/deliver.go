@@ -147,6 +147,15 @@ func (r Report) add(sinkName string, st model.DeliveryStatus) {
 // Run checks and sends what is due, and takes out what corrections replaced.
 func (d *Deliverer) Run(ctx context.Context) (Report, error) {
 	now := d.now()
+	names := make([]string, 0, len(d.Sinks))
+	for _, sk := range d.Sinks {
+		names = append(names, sk.Name())
+	}
+	if n, err := d.Store.EnsureDeliveries(ctx, names, now.AddDate(0, 0, -60), now); err != nil {
+		return nil, err
+	} else if n > 0 && d.Log != nil {
+		d.Log.Info("titles from before a destination was set up are now checked", "deliveries", n)
+	}
 	watches, err := d.Store.Watches(ctx, now.AddDate(0, 0, -60), now.Add(-15*time.Second))
 	if err != nil {
 		return nil, err

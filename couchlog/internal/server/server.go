@@ -112,10 +112,14 @@ func (s *Server) Run(ctx context.Context) error {
 		}()
 	}
 	if s.Ident != nil {
-		wg.Add(1)
+		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			s.posterLoop(ctx)
+		}()
+		go func() {
+			defer wg.Done()
+			s.retryIdentifyLoop(ctx)
 		}()
 	}
 	if len(s.Config.Sinks) > 0 {
@@ -323,6 +327,36 @@ func (s *Server) autoIdentify(ctx context.Context, sess *model.Session) {
 	s.Log.Info("identified", "session", sess.ID, "title", it.Title, "season", it.Season, "episode", it.Episode, "by", how)
 }
 
+// retryIdentifyLoop tries automatic identification again on the last three
+// days' unidentified sessions: half a minute after start (so a new rule
+// reaches sessions recorded before it) and every 15 minutes, each session
+// and title at most once an hour.
+func (s *Server) retryIdentifyLoop(ctx context.Context) {
+	tried := map[string]time.Time{}
+	wait := 30 * time.Second
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = 15 * time.Minute
+		list, err := s.Store.UnidentifiedWithHint(ctx, store.LocalUserID, time.Now().Add(-72*time.Hour))
+		if err != nil {
+			s.Log.Warn("identify again", "err", err)
+			continue
+		}
+		for _, sess := range list {
+			key := fmt.Sprintf("%d\x00%s\x00%s", sess.ID, sess.Hint.Title, sess.Hint.Subtitle)
+			if time.Since(tried[key]) < time.Hour {
+				continue
+			}
+			tried[key] = time.Now()
+			s.autoIdentify(ctx, sess)
+		}
+	}
+}
+
 // importPlex brings in Plex's own history now and every PlexEvery.
 func (s *Server) importPlex(ctx context.Context, c *plex.Client, days int) {
 	every := s.PlexEvery
@@ -528,7 +562,8 @@ func (s *Server) splitNetflix(ctx context.Context, c *netflix.Client, viewed []n
 	if err != nil || it == nil || items[len(items)-1].SameTitle(it.Identity) {
 		return 0
 	}
-	ns, err := s.Store.SplitNext(ctx, sess.ID, *it, s.Config.Sinks, time.Now())
+	// split where the new title started, not when Netflix got around to listing it
+	ns, err := s.Store.SplitNextAt(ctx, sess.ID, *it, s.Config.Sinks, newest.Started(), time.Now())
 	if err != nil {
 		s.Log.Warn("Netflix split", "session", sess.ID, "err", err)
 		return 0

@@ -147,3 +147,25 @@ func (s *Store) ServiceDevices(ctx context.Context, userID int64) (map[string][]
 	}
 	return out, rows.Err()
 }
+
+// UnidentifiedWithHint returns the sessions started after since that have
+// no item yet but a title the device published, oldest first: what
+// automatic identification can try again (after a restart, or a new rule).
+func (s *Store) UnidentifiedWithHint(ctx context.Context, userID int64, since time.Time) ([]*model.Session, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+sessionCols+` FROM sessions WHERE user_id = ? AND hidden <> 'ignored'
+		AND hint_title <> '' AND started_at > ? AND NOT EXISTS (SELECT 1 FROM items WHERE session_id = sessions.id
+		AND replaced_at IS NULL) ORDER BY started_at`, userID, ms(since))
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer rows.Close()
+	var out []*model.Session
+	for rows.Next() {
+		sess, err := scanSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sess)
+	}
+	return out, rows.Err()
+}

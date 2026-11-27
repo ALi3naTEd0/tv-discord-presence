@@ -50,3 +50,54 @@ func TestSubscriptionsAndSettings(t *testing.T) {
 		t.Errorf("missing: %v", err)
 	}
 }
+
+func TestSplitNextAtMovesTheTimeSince(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	t0 := time.Date(2026, 11, 26, 20, 27, 0, 0, time.UTC)
+	dev, _ := s.EnsureDevice(ctx, LocalUserID, "androidtv", "Box", "")
+	sess, _ := s.StartSession(ctx, dev, model.App{ID: "com.netflix.ninja"}, "", t0)
+	s.Touch(ctx, sess.ID, t0.Add(41*time.Minute), 41*time.Minute, true)
+	next := model.Item{Identity: model.Identity{Kind: model.KindEpisode, Title: "Sins of Our Mother", TMDB: 1, Season: 1, Episode: 3}}
+	// the new title started at 21:03; Netflix listed it at 21:08
+	ns, err := s.SplitNextAt(ctx, sess.ID, next, nil, t0.Add(36*time.Minute), t0.Add(41*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, _ := s.Session(ctx, sess.ID)
+	if !old.EndedAt.Equal(t0.Add(36*time.Minute)) || old.Played != 36*time.Minute {
+		t.Errorf("old: ended %v played %v", old.EndedAt, old.Played)
+	}
+	if !ns.StartedAt.Equal(t0.Add(36*time.Minute)) || ns.Played != 5*time.Minute || !ns.Open {
+		t.Errorf("new: started %v played %v open %v", ns.StartedAt, ns.Played, ns.Open)
+	}
+}
+
+func TestEnsureDeliveriesForTitlesFromBeforeASink(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now()
+	dev, _ := s.EnsureDevice(ctx, LocalUserID, "plex", "Plex", "")
+	sess, _ := s.StartSession(ctx, dev, model.App{ID: "plex"}, "", now.Add(-48*time.Hour))
+	it := model.Item{Identity: model.Identity{Kind: model.KindMovie, Title: "Listen", TMDB: 9}}
+	s.Identify(ctx, sess.ID, []model.Item{it}, nil, now) // recorded with no destinations
+	n, err := s.EnsureDeliveries(ctx, []string{"trakt", "simkl"}, now.AddDate(0, 0, -60), now)
+	if err != nil || n != 2 {
+		t.Fatalf("added %d, %v", n, err)
+	}
+	items, _ := s.Items(ctx, sess.ID)
+	if d, err := s.DeliveryOf(ctx, items[0].ID, "trakt"); err != nil || d.Status != model.Pending {
+		t.Errorf("%+v %v", d, err)
+	}
+	if n, _ := s.EnsureDeliveries(ctx, []string{"trakt", "simkl"}, now.AddDate(0, 0, -60), now); n != 0 {
+		t.Errorf("added again: %d", n)
+	}
+}

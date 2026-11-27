@@ -351,24 +351,39 @@ func nullInt(v int) any {
 // dashboard can offer Undo, and starts with the format already reported,
 // because the device only reports it when a decoder starts.
 func (s *Store) SplitNext(ctx context.Context, id int64, next model.Item, sinks []string, now time.Time) (*model.Session, error) {
+	return s.SplitNextAt(ctx, id, next, sinks, now, now)
+}
+
+// SplitNextAt is SplitNext with the split placed back at `at`, when the
+// switch is learned later (Netflix lists the new title minutes after it
+// started): the play time since `at` moves to the new session.
+func (s *Store) SplitNextAt(ctx context.Context, id int64, next model.Item, sinks []string, at, now time.Time) (*model.Session, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `UPDATE sessions SET state = 'closed', ended_at = ?, live_position_ms = NULL
-		WHERE id = ? AND state = 'open'`, ms(now), id)
+	var started, played int64
+	err = tx.QueryRowContext(ctx, "SELECT started_at, played_ms FROM sessions WHERE id = ? AND state = 'open'", id).Scan(&started, &played)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNoSession
+	}
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return nil, ErrNoSession
+	if at.After(now) || ms(at) <= started {
+		at = now
 	}
-	res, err = tx.ExecContext(ctx, `INSERT INTO sessions(user_id, device_id, source_key, app_id, app_name,
-		started_at, last_seen_at, last_play_at, media_id, video_codec, video_width, video_height, video_hdr, auto_next_from)
-		SELECT user_id, device_id, 'next:' || id, app_id, app_name, ?, ?, ?, media_id,
+	moved := min(max(ms(now)-ms(at), 0), played)
+	if _, err := tx.ExecContext(ctx, `UPDATE sessions SET state = 'closed', ended_at = ?, live_position_ms = NULL,
+		played_ms = played_ms - ? WHERE id = ?`, ms(at), moved, id); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	res, err := tx.ExecContext(ctx, `INSERT INTO sessions(user_id, device_id, source_key, app_id, app_name,
+		started_at, last_seen_at, last_play_at, played_ms, media_id, video_codec, video_width, video_height, video_hdr, auto_next_from)
+		SELECT user_id, device_id, 'next:' || id, app_id, app_name, ?, ?, ?, ?, media_id,
 		       video_codec, video_width, video_height, video_hdr, id
-		FROM sessions WHERE id = ?`, ms(now), ms(now), ms(now), id)
+		FROM sessions WHERE id = ?`, ms(at), ms(now), ms(now), moved, id)
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)
 	}
