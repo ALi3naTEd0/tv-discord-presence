@@ -67,7 +67,7 @@ func do(a *API, method, path, body string) *httptest.ResponseRecorder {
 }
 
 func TestIdentifyRemembersAndCounts(t *testing.T) {
-	a, st, sess := rig(t)
+	a, st, _ := rig(t)
 	ctx := context.Background()
 	rec := do(a, "POST", "/api/v1/sessions/1/identify", `{"kind":"tv","tmdb":277831,"season":1,"episodes":[4],"remember":true}`)
 	if rec.Code != 200 {
@@ -102,7 +102,6 @@ func TestIdentifyRemembersAndCounts(t *testing.T) {
 	if len(up) != 1 || up[0].Episode != 5 || up[0].Service.Key != "hbomax" {
 		t.Errorf("up next %+v", up)
 	}
-	_ = sess
 }
 
 func TestWritesNeedJSON(t *testing.T) {
@@ -154,5 +153,24 @@ func TestServiceProfiles(t *testing.T) {
 	}
 	if rec := do(a, "PUT", "/api/v1/settings/profile:hbomax", `{"value":"`+strings.Repeat("x", 61)+`"}`); rec.Code != 400 {
 		t.Errorf("long name: %d", rec.Code)
+	}
+}
+
+func TestLetterboxdExport(t *testing.T) {
+	a, _, _ := rig(t)
+	if rec := do(a, "POST", "/api/v1/sessions/1/identify", `{"kind":"movie","tmdb":603}`); rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	rec := do(a, "GET", "/api/v1/export/letterboxd.csv", "")
+	if rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/csv") {
+		t.Fatalf("%d %s", rec.Code, rec.Header())
+	}
+	lines := strings.Split(strings.TrimSpace(rec.Body.String()), "\n")
+	// the film is 100 min and 58 were played: not finished, not exported
+	if len(lines) != 1 || lines[0] != "Title,Year,imdbID,tmdbID,WatchedDate,Rewatch" {
+		t.Errorf("%q", lines)
+	}
+	if rec := do(a, "GET", "/api/v1/export/history.csv?days=7", ""); rec.Code != 200 || !strings.Contains(rec.Body.String(), "A Film") {
+		t.Errorf("history: %d %s", rec.Code, rec.Body)
 	}
 }

@@ -61,7 +61,7 @@
           <span class="state">{app.status.discord === 'on' ? 'status' : app.status.discord === 'dry-run' ? 'preview only' : 'off'}</span>
         </div>
       {/if}
-      <div class="ver">{app.status.version}</div>
+      <a class="ver" href="#/about" class:on={app.route === 'about'}>About Couchlog · {app.status.version}</a>
     </div>
   {/if}
 </nav>
@@ -86,7 +86,8 @@
   .dot { width: 8px; height: 8px; border-radius: 4px; background: #4b505a; }
   .dot.on { background: var(--ok); }
   .state { font-size: 12px; color: var(--muted); }
-  .ver { margin-top: auto; padding: 24px 12px 0; font-size: 11px; color: #4b505a; }
+  .ver { margin-top: auto; padding: 24px 12px 0; font-size: 11px; color: #5b616c; text-decoration: none; }
+  .ver:hover, .ver.on { color: var(--text-2); }
   @media (max-width: 760px) {
     nav { max-width: none; flex-basis: 100%; height: auto; position: sticky; z-index: 5; background: var(--bg);
       flex-direction: row; align-items: center; padding: 10px 12px; border-right: 0; border-bottom: 1px solid #1e2027; gap: 4px; }

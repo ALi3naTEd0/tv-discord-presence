@@ -59,6 +59,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/services", a.services)
 	mux.HandleFunc("PUT /api/v1/services/{key}", a.putService)
 	mux.HandleFunc("PUT /api/v1/settings/{key}", a.putSetting)
+	mux.HandleFunc("GET /api/v1/export/letterboxd.csv", a.letterboxd)
+	mux.HandleFunc("GET /api/v1/export/history.csv", a.historyCSV)
 	return mux
 }
 

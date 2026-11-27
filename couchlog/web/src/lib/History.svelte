@@ -12,11 +12,12 @@
   let tab = $state<Tab>((sessionStorage.getItem('history-tab') as Tab) || 'all')
   let q = $state('')
   let menu = $state<number>()
+  let exportOpen = $state(false)
 
   onMount(() => {
     sessionStorage.removeItem('history-tab')
     const pick = () => { tab = (sessionStorage.getItem('history-tab') as Tab) || tab; sessionStorage.removeItem('history-tab') }
-    const closeMenu = () => (menu = undefined)
+    const closeMenu = () => { menu = undefined; exportOpen = false }
     addEventListener('history-tab', pick)
     addEventListener('click', closeMenu)
     return () => { removeEventListener('history-tab', pick); removeEventListener('click', closeMenu) }
@@ -89,10 +90,21 @@
       <h1>History</h1>
       <div class="sub">Everything watched on every TV, box and Plex. {app.history.filter(s => !s.hidden).length} sessions in 30 days.</div>
     </div>
+    <div class="hr">
+    <div class="exp">
+      <button aria-expanded={exportOpen} onclick={(e) => { e.stopPropagation(); exportOpen = !exportOpen }}>Export</button>
+      {#if exportOpen}
+        <div class="menu" role="menu">
+          <a role="menuitem" href="/api/v1/export/letterboxd.csv" download>Movies for Letterboxd <span>CSV to import at letterboxd.com/import</span></a>
+          <a role="menuitem" href="/api/v1/export/history.csv" download>Everything <span>every session, with IDs and send status</span></a>
+        </div>
+      {/if}
+    </div>
     <label class="search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
       <input bind:value={q} placeholder="Search your history…" aria-label="Search your history" />
     </label>
+    </div>
   </header>
 
   <div class="tabs" role="group" aria-label="Show">
@@ -162,6 +174,13 @@
   header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
   h1 { margin: 0; font-size: 34px; }
   .sub { margin-top: 6px; font-size: 14px; color: var(--muted); }
+  .hr { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; flex: 0 1 460px; justify-content: flex-end; }
+  .exp { position: relative; }
+  .exp > button { min-height: 44px; padding: 0 16px; border-radius: 12px; border: 1px solid #2e323b; background: transparent;
+    color: var(--text-2); font-weight: 600; font-size: 14px; }
+  .exp .menu { left: 0; right: auto; min-width: 280px; }
+  .exp .menu a { flex-direction: column; align-items: flex-start; justify-content: center; min-height: 52px; gap: 2px; }
+  .exp .menu span { font-size: 12px; color: var(--muted); }
   .search { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 14px; border-radius: 12px; background: var(--panel);
     border: 1px solid #2e323b; color: var(--muted); flex: 0 1 320px; }
   .search input { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--text); font: inherit; font-size: 14px; }
