@@ -1,9 +1,19 @@
 ---
 name: scrobbler-dashboard
-description: Operate Couchlog, the self-hosted TV watch-history stack — tvpresence (LG webOS TV + Android TV box → Discord Rich Presence + session capture), the Couchlog dashboard (:7790, tailnet https :8444, installable PWA) that identifies sessions and sends them to Trakt and Simkl by ID (auto-send when a session ends), the Plex importer and "Now on Plex" card, the Mi Box (ADB, HDMI-CEC, HDR/format info) and tvsync_reconcile.py for full Trakt↔Simkl reconciliation. Trigger when the user says "Couchlog", "dashboard de historial", "scrobbler dashboard", "qué estoy viendo", "no se scrobbleó", "no aparece en Trakt/Simkl", "identifica lo de HBO/Netflix/YouTube", "envía los pendientes", "revisa Trakt/Simkl", "importa de Plex", "now playing", "el Discord no muestra el título", "la Mi Box / Android TV", "resolución / HDR / códec", "el control de la LG", "concilia Trakt y Simkl", or invokes /scrobbler-dashboard.
+description: Operate Couchlog, the self-hosted TV watch-history stack — since 2026-11-27 the Go binary `couchlog server` (dashboard + API on :7791, tailnet :8444/:8445; the Python tvpresence/tvhistory are retired), before that tvpresence (LG webOS TV + Android TV box → Discord Rich Presence + session capture), the Couchlog dashboard (:7790, tailnet https :8444, installable PWA) that identifies sessions and sends them to Trakt and Simkl by ID (auto-send when a session ends), the Plex importer and "Now on Plex" card, the Mi Box (ADB, HDMI-CEC, HDR/format info) and tvsync_reconcile.py for full Trakt↔Simkl reconciliation. Trigger when the user says "Couchlog", "dashboard de historial", "scrobbler dashboard", "qué estoy viendo", "no se scrobbleó", "no aparece en Trakt/Simkl", "identifica lo de HBO/Netflix/YouTube", "envía los pendientes", "revisa Trakt/Simkl", "importa de Plex", "now playing", "el Discord no muestra el título", "la Mi Box / Android TV", "resolución / HDR / códec", "el control de la LG", "concilia Trakt y Simkl", or invokes /scrobbler-dashboard.
 ---
 
 # Couchlog (scrobbler dashboard)
+
+## Since 2026-11-27: the Go version is the live system
+
+- **Live:** `couchlog server` (`systemctl --user … couchlog`, binary `~/.local/bin/couchlog`, module `~/tv-discord-presence/couchlog`, branch `go-rewrite`). Captures LG + Android TV, imports Plex, identifies (TMDB, Netflix activity, auto rules), sends to Trakt/Simkl (`read_only = false`) and shows the Discord status (`presence = "on"`). Config `~/.config/couchlog/config.toml` (backup of the parallel-run version: `config.toml.before-switch`), DB `~/.config/couchlog/couchlog.db`.
+- **Dashboard:** Svelte, embedded in the binary: `http://127.0.0.1:7791`, tailnet `https://archlinux.tail3d0a8b.ts.net:8444` (old URL, now pointed here) and `:8445`. Never Funnel (no login). API under `/api/v1` (status, now, history, sessions/{id}/identify|hidden, search, shows, insights, upnext, services, settings, setup, netflix, export). Editing `couchlog/web` needs `npm run build` (output committed in `internal/web/dist`, CI checks it) and a rebuild.
+- **Retired:** `tvpresence.service` and `tvhistory.service` are stopped and disabled (2026-11-27). Their history.db stays as an archive; `couchlog compare` still reads it. To roll back: `systemctl --user enable --now tvpresence tvhistory`, set `read_only = true` and `presence = "dry-run"` in the Go config and restart couchlog, point `tailscale serve --https=8444` back to 7790.
+- **Still needed:** `trakt-scrobbler.service` (its token file is what Couchlog uses for Trakt; it renews it).
+- The rest of this file describes the Python version; the rules (auto-send, no writes without OK, never Funnel) still apply.
+
+## Before 2026-11-27 (Python)
 
 Repo: `~/tv-discord-presence` (GitHub `ALi3naTEd0/tv-discord-presence`, public, MIT). Full docs live there:
 `README.md`, `docs/architecture.md`, `docs/gotchas.md`, `docs/reconcile.md`. **Read `docs/gotchas.md` before debugging anything.**

@@ -2,8 +2,7 @@
 
 > **Status (2026-11-27):** the Go version is the live system on the author's machine: it sends to Trakt and Simkl and shows the Discord status; the Python `tvpresence` and `tvhistory` services are retired. The parallel run ended with `couchlog compare` at 22 matching sessions and 2 that differed only by corrections made by hand in Python.
 
-Status: **draft, stage 2 (Design)**. The Python version keeps running until the
-Go version gives the same results on the same TVs (see *Migration*).
+Status: written at stage 2 (Design); see the note above for where it stands.
 
 ## Goals
 
