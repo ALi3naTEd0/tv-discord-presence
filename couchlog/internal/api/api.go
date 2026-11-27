@@ -11,9 +11,11 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
+	"github.com/ALi3naTEd0/couchlog/internal/identify"
 	"github.com/ALi3naTEd0/couchlog/internal/model"
 	"github.com/ALi3naTEd0/couchlog/internal/store"
 )
@@ -21,6 +23,7 @@ import (
 // API serves /api/v1.
 type API struct {
 	Store    *store.Store
+	Ident    *identify.Identifier // nil without a TMDB key: no search, identify or up next
 	Version  string
 	Sinks    []string // destinations set up ("trakt", "simkl")
 	ReadOnly bool
@@ -42,6 +45,16 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/now", a.nowPlaying)
 	mux.HandleFunc("GET /api/v1/history", a.history)
 	mux.HandleFunc("GET /api/v1/sessions/{id}", a.session)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/identify", a.identifySession)
+	mux.HandleFunc("POST /api/v1/sessions/{id}/hidden", a.hideSession)
+	mux.HandleFunc("GET /api/v1/search", a.search)
+	mux.HandleFunc("GET /api/v1/shows/{tmdb}", a.show)
+	mux.HandleFunc("GET /api/v1/shows/{tmdb}/seasons/{n}", a.season)
+	mux.HandleFunc("GET /api/v1/insights", a.insights)
+	mux.HandleFunc("GET /api/v1/upnext", a.upNext)
+	mux.HandleFunc("GET /api/v1/services", a.services)
+	mux.HandleFunc("PUT /api/v1/services/{key}", a.putService)
+	mux.HandleFunc("PUT /api/v1/settings/{key}", a.putSetting)
 	return mux
 }
 
@@ -52,6 +65,7 @@ type Status struct {
 	Sinks      []string  `json:"sinks"`
 	ReadOnly   bool      `json:"read_only"`
 	Devices    []Device  `json:"devices"`
+	Identify   bool      `json:"identify"` // search and identify work (a TMDB key is set)
 }
 
 // Device is a TV, box or server.
@@ -67,13 +81,15 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err)
 		return
 	}
-	st := Status{Version: a.Version, ServerTime: a.now(), Sinks: a.Sinks, ReadOnly: a.ReadOnly, Devices: []Device{}}
+	st := Status{Version: a.Version, ServerTime: a.now(), Sinks: a.Sinks, ReadOnly: a.ReadOnly, Devices: []Device{},
+		Identify: a.Ident != nil}
 	if st.Sinks == nil {
 		st.Sinks = []string{}
 	}
 	for _, d := range devs {
 		st.Devices = append(st.Devices, Device{ID: d.ID, Kind: d.Kind, Name: d.Name})
 	}
+	sort.Slice(st.Devices, func(i, j int) bool { return st.Devices[i].ID < st.Devices[j].ID })
 	writeJSON(w, st)
 }
 

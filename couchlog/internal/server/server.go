@@ -541,7 +541,7 @@ func (s *Server) serveHTTP(ctx context.Context, wg *sync.WaitGroup, addr string)
 	if err != nil {
 		return err
 	}
-	a := &api.API{Store: s.Store, Version: s.Version, Sinks: s.Config.Sinks, ReadOnly: s.Config.ReadOnly,
+	a := &api.API{Store: s.Store, Ident: s.Ident, Version: s.Version, Sinks: s.Config.Sinks, ReadOnly: s.Config.ReadOnly,
 		Log: s.Log.With("part", "api")}
 	mux := http.NewServeMux()
 	mux.Handle("/api/", a.Handler())

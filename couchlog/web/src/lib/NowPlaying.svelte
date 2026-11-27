@@ -6,6 +6,7 @@
   import Logo from './Logo.svelte'
   import QualityChips from './QualityChips.svelte'
   import SiteLinks from './SiteLinks.svelte'
+  import { identify } from './actions'
 
   let { session, sinks }: { session?: Session; sinks: string[] } = $props()
 
@@ -65,7 +66,10 @@
         {/if}
         {#if it && sinksLine}<div class="dest">Goes to {sinksLine} when it ends</div>{/if}
 
-        {#if it}<SiteLinks links={it.links} />{/if}
+        <div class="acts">
+          <button class="primary" onclick={() => session && identify(session)}>{it ? 'Not this? Change' : 'Identify'}</button>
+          {#if it}<SiteLinks links={it.links} size={32} />{/if}
+        </div>
       </div>
     </div>
   {:else}
@@ -109,6 +113,10 @@
     font-variant-numeric: tabular-nums; }
   .meta strong { color: var(--text); }
   .dest { font-size: 13px; color: #a995b6; }
+  .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-top: 6px; }
+  .primary { min-height: 44px; padding: 0 18px; border-radius: 12px; border: 0; background: var(--text); color: #0b0c0f;
+    font-weight: 700; font-size: 14px; }
+  .primary:hover { background: #fff; }
   .idle h1 { font-size: 40px; }
   .idle p { color: #cdb9d8; margin: 8px 0 0; }
   @media (max-width: 640px) {

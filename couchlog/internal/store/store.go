@@ -19,8 +19,11 @@ import (
 //go:embed schema.sql
 var schemaV1 string
 
+//go:embed schema_v2.sql
+var schemaV2 string
+
 // migrations[i] takes the database from version i to i+1.
-var migrations = []string{schemaV1}
+var migrations = []string{schemaV1, schemaV2}
 
 // LocalUserID is the single user of a self-hosted install.
 const LocalUserID int64 = 1

@@ -58,16 +58,72 @@ export interface Status {
   sinks: string[]
   read_only: boolean
   devices: { id: number; kind: string; name: string }[]
+  identify: boolean
 }
 
-async function get<T>(path: string): Promise<T> {
-  const r = await fetch(path, { headers: { Accept: 'application/json' } })
-  if (!r.ok) throw new Error(`${path}: ${r.status}`)
-  return r.json()
+export interface ServiceInfo { key: string; name: string; free?: 'library' | 'free' | 'ads' }
+export interface Price { amount: number; currency: string; period: 'month' | 'year'; monthly: number }
+export interface ServiceHours extends ServiceInfo { hours: number; price?: Price; per_hour?: number }
+
+export interface Insights {
+  days: number
+  from: string
+  first_seen?: string
+  hours: number
+  sessions: number
+  movies: { n: number; hours: number }
+  episodes: { n: number; hours: number }
+  sent: number
+  services: ServiceHours[]
+  weeks: { start: string; hours: number }[]
+  top_shows: { tmdb: number; title: string; poster?: string; episodes: number; hours: number }[]
+  currency: string
 }
+
+export interface ServiceRow extends ServiceHours { devices: string[] }
+export interface Services { currency: string; services: ServiceRow[] }
+
+export interface UpNext {
+  tmdb: number
+  title: string
+  poster?: string
+  season: number
+  episode: number
+  episode_title?: string
+  service: ServiceInfo
+  last_at: string
+}
+
+export interface Result { kind: 'movie' | 'tv'; tmdb: number; title: string; original_title?: string; year?: number; poster?: string; overview?: string }
+export interface Show { tmdb: number; title: string; year?: number; poster?: string; seasons: { number: number; episodes: number }[] }
+export interface Episode { number: number; name?: string; runtime_min?: number; air_date?: string; watched?: boolean }
+
+export interface IdentifyRequest { kind: 'movie' | 'tv'; tmdb: number; season?: number; episodes?: number[]; remember?: boolean }
+
+async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const r = await fetch(path, {
+    method,
+    headers: body === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (!r.ok) throw new Error((await r.text()).trim() || `${path}: ${r.status}`)
+  return r.status === 204 ? (undefined as T) : r.json()
+}
+const get = <T>(path: string) => call<T>('GET', path)
 
 export const api = {
   status: () => get<Status>('/api/v1/status'),
   now: () => get<Sessions>('/api/v1/now'),
   history: (days: number) => get<Sessions>(`/api/v1/history?days=${days}`),
+  insights: (days: number) => get<Insights>(`/api/v1/insights?days=${days}`),
+  upNext: () => get<UpNext[]>('/api/v1/upnext'),
+  services: () => get<Services>('/api/v1/services'),
+  search: (q: string) => get<Result[]>(`/api/v1/search?q=${encodeURIComponent(q)}`),
+  show: (tmdb: number) => get<Show>(`/api/v1/shows/${tmdb}`),
+  season: (tmdb: number, n: number) => get<Episode[]>(`/api/v1/shows/${tmdb}/seasons/${n}`),
+  identify: (id: number, req: IdentifyRequest) => call<Session>('POST', `/api/v1/sessions/${id}/identify`, req),
+  setHidden: (id: number, hidden: boolean) => call<Session>('POST', `/api/v1/sessions/${id}/hidden`, { hidden }),
+  setPrice: (key: string, price: number, currency: string, period: string) =>
+    call<Services>('PUT', `/api/v1/services/${encodeURIComponent(key)}`, { price, currency, period }),
+  setCurrency: (value: string) => call<void>('PUT', '/api/v1/settings/currency', { value }),
 }

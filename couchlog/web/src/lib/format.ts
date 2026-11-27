@@ -42,3 +42,37 @@ export function titleOf(s: Session) {
 
 const SINK = { trakt: 'Trakt', simkl: 'Simkl' } as Record<string, string>
 export const sinkName = (k: string) => SINK[k] ?? k
+
+export function money(amount: number, currency: string) {
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: amount < 100 ? 2 : 0 }).format(amount)
+  } catch {
+    return `${currency} ${amount.toFixed(2)}`
+  }
+}
+
+export const hrs = (h: number) => `${h < 10 ? h.toFixed(1) : Math.round(h)} h`
+
+const dayFmt = new Intl.DateTimeFormat(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
+/** "Today · Thu, Nov 27", "Yesterday · …", "Tue, Nov 25" */
+export function dayLabel(ms: number, nowMs: number) {
+  const d = new Date(ms), n = new Date(nowMs)
+  const days = Math.round((new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime()
+    - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 86400000)
+  const label = dayFmt.format(d)
+  return days === 0 ? `Today · ${label}` : days === 1 ? `Yesterday · ${label}` : label
+}
+
+export const shortDate = (iso: string) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(iso))
+
+/** A delivery status in a few words. */
+export function deliveryWord(status: string) {
+  switch (status) {
+    case 'added': case 'skipped': return '✓'
+    case 'not_found': return 'not listed'
+    case 'error': return 'failed'
+    case 'remove': return 'removing'
+    case 'removed': return 'removed'
+    default: return 'waiting'
+  }
+}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -90,6 +91,59 @@ func (s *Store) Deliveries(ctx context.Context, itemID int64) ([]model.Delivery,
 		}
 		d.Status, d.UpdatedAt = model.DeliveryStatus(status), fromMS(updated)
 		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// WatchedEpisodes returns the (season, episode) pairs of a show in the
+// user's history.
+func (s *Store) WatchedEpisodes(ctx context.Context, userID int64, tmdb int) (map[[2]int]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT i.season, i.episode FROM items i JOIN sessions s ON s.id = i.session_id
+		WHERE s.user_id = ? AND i.tmdb = ? AND i.kind = 'episode' AND i.replaced_at IS NULL
+		AND i.season IS NOT NULL AND i.episode IS NOT NULL`, userID, tmdb)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer rows.Close()
+	out := map[[2]int]bool{}
+	for rows.Next() {
+		var se, ep int
+		if err := rows.Scan(&se, &ep); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+		out[[2]int{se, ep}] = true
+	}
+	return out, rows.Err()
+}
+
+// FirstSession is when the user's oldest session started, or nil.
+func (s *Store) FirstSession(ctx context.Context, userID int64) (*time.Time, error) {
+	var v sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, "SELECT MIN(started_at) FROM sessions WHERE user_id = ?", userID).Scan(&v); err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	if !v.Valid {
+		return nil, nil
+	}
+	t := fromMS(v.Int64)
+	return &t, nil
+}
+
+// ServiceDevices returns, per app id, the devices it was watched on.
+func (s *Store) ServiceDevices(ctx context.Context, userID int64) (map[string][]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT s.app_id, d.name FROM sessions s
+		JOIN devices d ON d.id = s.device_id WHERE s.user_id = ? AND s.hidden = ''`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var app, dev string
+		if err := rows.Scan(&app, &dev); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+		out[app] = append(out[app], dev)
 	}
 	return out, rows.Err()
 }
