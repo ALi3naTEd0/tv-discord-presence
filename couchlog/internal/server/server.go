@@ -48,6 +48,7 @@ type Server struct {
 
 	mu        sync.Mutex
 	splitDone map[string]bool // Netflix splits already made (session/entry)
+	nf        *netflix.Client // the Netflix connection, when Netflix is on
 
 	// newSource builds a device's source; tests replace it.
 	newSource func(d config.Device, id int64) source.Source
@@ -132,11 +133,12 @@ func (s *Server) Run(ctx context.Context) error {
 		}
 	}
 	if s.Config.Netflix && s.Ident != nil {
+		path := netflix.SessionPath(s.DataDir)
+		s.nf = &netflix.Client{Cookies: netflix.SessionCookies(path), SessionPath: path}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			path := netflix.SessionPath(s.DataDir)
-			s.netflixLoop(ctx, &netflix.Client{Cookies: netflix.SessionCookies(path), SessionPath: path})
+			s.netflixLoop(ctx, s.nf)
 		}()
 	}
 	if p := s.Config.Plex; p != nil {
@@ -543,6 +545,15 @@ func (s *Server) serveHTTP(ctx context.Context, wg *sync.WaitGroup, addr string)
 	}
 	a := &api.API{Store: s.Store, Ident: s.Ident, Version: s.Version, Sinks: s.Config.Sinks, ReadOnly: s.Config.ReadOnly,
 		Presence: s.Config.Presence, Log: s.Log.With("part", "api")}
+	if nf := s.nf; nf != nil {
+		a.NetflixProfile = func(ctx context.Context) (string, error) {
+			p, err := nf.Profile(ctx)
+			if err != nil {
+				return "", err
+			}
+			return p.Name, nil
+		}
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/api/", a.Handler())
 	mux.Handle("/", web.Handler())

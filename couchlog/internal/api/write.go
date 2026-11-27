@@ -343,6 +343,20 @@ func (a *API) putSetting(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &req) {
 		return
 	}
+	if strings.HasPrefix(key, "profile:") && len(key) > len("profile:") && len(key) <= 90 {
+		// your profile on a service ("profile:hbomax" = "Gordo"); "" forgets it
+		v := strings.TrimSpace(req.Value)
+		if len([]rune(v)) > 60 {
+			badRequest(w, "profile names are up to 60 characters")
+			return
+		}
+		if err := a.Store.SetSetting(r.Context(), store.LocalUserID, key, v); err != nil {
+			a.fail(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if !settingKeys[key] || len(req.Value) > 200 {
 		badRequest(w, "unknown setting")
 		return

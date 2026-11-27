@@ -81,7 +81,7 @@ export interface Insights {
   currency: string
 }
 
-export interface ServiceRow extends ServiceHours { devices: string[] }
+export interface ServiceRow extends ServiceHours { devices: string[]; profile?: string; profile_from?: 'you' | 'netflix' }
 export interface Services { currency: string; services: ServiceRow[] }
 
 export interface UpNext {
@@ -127,4 +127,5 @@ export const api = {
   setPrice: (key: string, price: number, currency: string, period: string) =>
     call<Services>('PUT', `/api/v1/services/${encodeURIComponent(key)}`, { price, currency, period }),
   setCurrency: (value: string) => call<void>('PUT', '/api/v1/settings/currency', { value }),
+  setProfile: (key: string, value: string) => call<void>('PUT', `/api/v1/settings/profile:${encodeURIComponent(key)}`, { value }),
 }

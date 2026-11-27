@@ -11,6 +11,7 @@
   let data = $state<Services>()
   let drafts = $state<Record<string, { price: string; currency: string; period: string; open?: boolean }>>({})
   let adding = $state('')
+  let profiles = $state<Record<string, string>>({})
 
   onMount(load)
   async function load() {
@@ -19,6 +20,7 @@
   function apply(d: Services) {
     data = d
     for (const s of d.services) {
+      profiles[s.key] = s.profile ?? ''
       drafts[s.key] = { price: s.price ? String(s.price.amount) : drafts[s.key]?.price ?? '', currency: s.price?.currency ?? d.currency,
         period: s.price?.period ?? 'month', open: drafts[s.key]?.open }
     }
@@ -31,6 +33,15 @@
     try {
       apply(await api.setPrice(s.key, price, d.currency, d.period))
       toast(price ? `Saved: ${s.name} ${money(price, d.currency)} a ${d.period}` : `${s.name}: price removed`)
+    } catch (e) { toast(`Not saved: ${(e as Error).message}`) }
+  }
+  async function saveProfile(s: ServiceRow) {
+    const v = (profiles[s.key] ?? '').trim()
+    if (v === (s.profile ?? '')) return
+    try {
+      await api.setProfile(s.key, v)
+      toast(v ? `${s.name}: profile ${v}` : `${s.name}: profile cleared`)
+      load()
     } catch (e) { toast(`Not saved: ${(e as Error).message}`) }
   }
   async function setCurrency(c: string) {
@@ -106,7 +117,16 @@
         <div class="tr">
           <div class="svc">
             <Logo slug={s.key} size={40} fallback={s.name} />
-            <div><div class="sn">{s.name}</div><div class="sd">{s.devices.length ? `On ${s.devices.join(', ')}` : 'Added by you'}</div></div>
+            <div class="si">
+              <div class="sn">{s.name}</div>
+              <div class="sd">{s.devices.length ? `On ${s.devices.join(', ')}` : 'Added by you'}</div>
+              <label class="prof" title={s.profile_from === 'netflix' ? 'Read from your Netflix connection. Type another name to change it.' : 'Which profile you use on this service'}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+                <input aria-label="{s.name} profile" placeholder="Your profile" bind:value={profiles[s.key]}
+                  onchange={() => saveProfile(s)} onkeydown={(e) => e.key === 'Enter' && e.currentTarget.blur()} />
+                {#if s.profile_from === 'netflix' && profiles[s.key] === s.profile}<span class="auto">from Netflix</span>{/if}
+              </label>
+            </div>
           </div>
           {#if s.free && !s.price && !d?.open}
             <span class="free">{freeLabel[s.free]}{#if s.free !== 'library'} · <button class="link" onclick={() => (d.open = true)}>I pay for it</button>{/if}</span>
@@ -158,7 +178,13 @@
   .th { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid #23262e; }
   .tr { border-bottom: 1px solid #1f2229; }
   .svc { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .si { min-width: 0; flex: 1; }
   .sn { font-weight: 600; font-size: 15px; }
+  .prof { display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--muted); max-width: 240px; }
+  .prof input { min-height: 30px; height: 30px; padding: 0 8px; border-radius: 8px; font-size: 13px; background: transparent;
+    border: 1px dashed #2e323b; }
+  .prof input:focus { border-style: solid; border-color: var(--accent); background: #0e0f12; }
+  .prof .auto { font-size: 11px; color: var(--sent-fg); white-space: nowrap; }
   .sd { font-size: 12px; color: var(--muted); }
   .free { grid-column: span 1; font-size: 14px; color: var(--muted); white-space: nowrap; }
   .link { background: none; border: 0; padding: 0; color: var(--accent); font-size: 13px; }

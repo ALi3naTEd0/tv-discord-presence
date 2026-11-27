@@ -140,3 +140,19 @@ func TestServicePrices(t *testing.T) {
 		t.Errorf("currency: %d", rec.Code)
 	}
 }
+
+func TestServiceProfiles(t *testing.T) {
+	a, _, _ := rig(t)
+	a.NetflixProfile = func(context.Context) (string, error) { return "Gordo", nil }
+	if rec := do(a, "PUT", "/api/v1/settings/profile:hbomax", `{"value":"  Gordo  "}`); rec.Code != 204 {
+		t.Fatalf("set: %d %s", rec.Code, rec.Body)
+	}
+	var s Services
+	json.Unmarshal(do(a, "GET", "/api/v1/services", "").Body.Bytes(), &s)
+	if len(s.Services) != 1 || s.Services[0].Profile != "Gordo" || s.Services[0].ProfileFrom != "you" {
+		t.Errorf("%+v", s.Services)
+	}
+	if rec := do(a, "PUT", "/api/v1/settings/profile:hbomax", `{"value":"`+strings.Repeat("x", 61)+`"}`); rec.Code != 400 {
+		t.Errorf("long name: %d", rec.Code)
+	}
+}

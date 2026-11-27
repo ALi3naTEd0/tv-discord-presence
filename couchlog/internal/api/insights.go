@@ -272,6 +272,11 @@ type ServiceRow struct {
 	Price   *Price   `json:"price,omitempty"`
 	PerHour *float64 `json:"per_hour,omitempty"`
 	Devices []string `json:"devices"` // where you watched it
+	// Profile is whose profile on the service this history is ("Gordo").
+	// Netflix reads it from Couchlog's Netflix connection (ProfileFrom
+	// "netflix"); other services do not say, so you type it ("you").
+	Profile     string `json:"profile,omitempty"`
+	ProfileFrom string `json:"profile_from,omitempty"`
 }
 
 // Services is the Services screen: every service seen plus every one with a price.
@@ -322,7 +327,35 @@ func (a *API) services(w http.ResponseWriter, r *http.Request) {
 		}
 		out.Services = append(out.Services, ServiceRow{ServiceInfo: info, Devices: names})
 	}
+	if err := a.fillProfiles(r.Context(), out.Services); err != nil {
+		a.fail(w, err)
+		return
+	}
 	writeJSON(w, out)
+}
+
+// fillProfiles adds each service's profile: the one you typed, else for
+// Netflix the profile Couchlog's Netflix connection reads.
+func (a *API) fillProfiles(ctx context.Context, rows []ServiceRow) error {
+	for i := range rows {
+		v, err := a.Store.Setting(ctx, store.LocalUserID, "profile:"+rows[i].Key, "")
+		if err != nil {
+			return err
+		}
+		if v != "" {
+			rows[i].Profile, rows[i].ProfileFrom = v, "you"
+			continue
+		}
+		if rows[i].Key == "netflix" && a.NetflixProfile != nil {
+			pctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			name, err := a.NetflixProfile(pctx)
+			cancel()
+			if err == nil && name != "" {
+				rows[i].Profile, rows[i].ProfileFrom = name, "netflix"
+			}
+		}
+	}
+	return nil
 }
 
 func contains(xs []string, x string) bool {

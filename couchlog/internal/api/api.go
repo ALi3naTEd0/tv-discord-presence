@@ -28,8 +28,11 @@ type API struct {
 	Sinks    []string // destinations set up ("trakt", "simkl")
 	ReadOnly bool
 	Presence string // Discord status: on | dry-run | off
-	Log      *slog.Logger
-	Now      func() time.Time // tests set it
+	// NetflixProfile names the profile of Couchlog's Netflix connection;
+	// nil when Netflix is not connected.
+	NetflixProfile func(ctx context.Context) (string, error)
+	Log            *slog.Logger
+	Now            func() time.Time // tests set it
 }
 
 func (a *API) now() time.Time {
