@@ -1988,6 +1988,26 @@ def next_after_last(conn, show_id: int):
     return s, e
 
 
+def episode_by_number_or_name(show_id: int, season, episode, ep_name: str, need_name: bool = False):
+    """(season, episode) for what an app published as "S03:E02 - Kim". Apps number episodes their own
+    way (Tubi's S3E2 "Kim" is S3E3 on TMDB), so the name wins when it names one episode; the number
+    is trusted alone only when there is no name to check, or the show has no episode names yet.
+    need_name: the show itself is a guess (the one last watched in the app), so the name must match."""
+    if ep_name:
+        # the app's season first: common names ("Ryan") repeat across seasons
+        sz = next((z for z in show_episodes(show_id)["seasons"] if z["number"] == season), None)
+        hits = [e["number"] for e in (sz or {}).get("episodes", []) if _norm_title(e.get("name")) == _norm_title(ep_name)]
+        if len(hits) == 1:
+            return season, hits[0]
+        se = episode_by_name(show_id, ep_name)
+        if isinstance(se, tuple):
+            return se
+        if se != "placeholders":
+            return None   # the name is not this show's, or ambiguous: ask
+        return None if need_name else (season, episode)
+    return None if need_name else (season, episode)
+
+
 def auto_identify_session(conn, sess):
     """(kind, tmdb id, season, episode, how) for a session the rules are sure about, else None."""
     title, sub = (sess["hint_title"] or "").strip(), (sess["hint_extra"] or "").strip()
@@ -2011,17 +2031,17 @@ def auto_identify_session(conn, sess):
         for n in (name, sub):
             show = tmdb_unique(n, "tv")
             if show:
-                return "tv", show["id"], season, episode, "match"
+                se = episode_by_number_or_name(show["id"], season, episode, ep_name)
+                return ("tv", show["id"], se[0], se[1], "match") if se else None
         if ep_name:   # no show name (Tubi): the show you were watching in this app, if the name matches
             prev = conn.execute(
                 "SELECT i.tmdb FROM items i JOIN sessions s ON s.id=i.session_id WHERE s.app_id=? AND i.kind='episode'"
                 " AND i.tmdb IS NOT NULL AND s.started_at > ? AND s.id <> ? ORDER BY s.started_at DESC LIMIT 1",
                 (sess["app_id"], time.time() - 30 * 86400, sess["id"])).fetchone()
             if prev:
-                sz = next((z for z in show_episodes(prev["tmdb"])["seasons"] if z["number"] == season), None)
-                ep = next((e for e in (sz or {}).get("episodes", []) if e["number"] == episode), None)
-                if ep and _norm_title(ep.get("name")) == _norm_title(ep_name):
-                    return "tv", prev["tmdb"], season, episode, "continuation"
+                se = episode_by_number_or_name(prev["tmdb"], season, episode, ep_name, need_name=True)
+                if se:
+                    return "tv", prev["tmdb"], se[0], se[1], "continuation"
         return None
     mv = tmdb_unique(title, "movie")
     show = tmdb_unique(sub, "tv") if sub else None

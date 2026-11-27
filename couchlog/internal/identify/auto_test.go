@@ -43,14 +43,16 @@ func autoCatalog() *fakeCatalog {
 	unseamly := Title{Kind: Show, TMDB: 300100, Title: "Unseamly: The Investigation of Peter Nygård", Seasons: []Season{{Number: 1, Episodes: 4}}}
 	short := Title{Kind: Show, TMDB: 300101, Title: "Unseamly: The Investigation of Pete", Seasons: []Season{{Number: 1, Episodes: 4}}}
 	tate := Title{Kind: Show, TMDB: 343245, Title: "Andrew Tate: Toxic Empire", Year: 2026, Seasons: []Season{{Number: 1, Episodes: 4}}}
-	intervention := Title{Kind: Show, TMDB: 1435, Title: "Intervention", Seasons: []Season{{Number: 1, Episodes: 12}, {Number: 2, Episodes: 26}}}
+	intervention := Title{Kind: Show, TMDB: 1435, Title: "Intervention", Seasons: []Season{{Number: 1, Episodes: 12}, {Number: 2, Episodes: 26}, {Number: 3, Episodes: 15}}}
 	fire := Title{Kind: Movie, TMDB: 555, Title: "Missing from Fire Trail Road", Year: 2025}
 	for _, x := range []Title{unseamly, short, tate, intervention, fire} {
 		c.titles[string(x.Kind)+":"+itoa(x.TMDB)] = x
 	}
 	c.seasons["300101:1"] = []Episode{{Number: 1, Name: "Polyester King"}, {Number: 2, Name: "Devil in His Eyes"}}
 	c.seasons["343245:1"] = []Episode{{Number: 1, Name: "Episode 1"}, {Number: 2, Name: "Episode 2"}}
-	c.seasons["1435:2"] = []Episode{{Number: 20, Name: "Laurie & Jessie"}, {Number: 21, Name: "Lauren"}}
+	c.seasons["1435:2"] = []Episode{{Number: 20, Name: "Laurie & Jessie"}, {Number: 21, Name: "Lauren"}, {Number: 22, Name: "Ryan"}}
+	// as TMDB lists it: Tubi calls "Kim" S3E2
+	c.seasons["1435:3"] = []Episode{{Number: 1, Name: "Ryan"}, {Number: 2, Name: "Jacob"}, {Number: 3, Name: "Kim"}}
 	c.searches["Unseamly: The Investigation of Pete"] = []Title{short}
 	c.searches["Andrew Tate: Toxic Empire"] = []Title{tate}
 	c.searches["Missing From Fire Trail Road"] = []Title{fire}
@@ -126,6 +128,14 @@ func TestAutoTubiContinuesTheShow(t *testing.T) {
 	it, how, err := id.Auto(ctx, store.LocalUserID, tubi("S02:E21 - Lauren"))
 	if err != nil || it == nil || it.TMDB != 1435 || it.Episode != 21 || how != ByContinuation {
 		t.Fatalf("continuation: %+v %q %v", it, how, err)
+	}
+	// Tubi numbers "Kim" S3E2; TMDB has it as E3: the name wins.
+	if it, _, _ := id.Auto(ctx, store.LocalUserID, tubi("S03:E02 - Kim")); it == nil || it.Season != 3 || it.Episode != 3 {
+		t.Errorf("Kim: %+v", it)
+	}
+	// "Ryan" is in seasons 2 and 3: the app's season decides.
+	if it, _, _ := id.Auto(ctx, store.LocalUserID, tubi("S03:E01 - Ryan")); it == nil || it.Season != 3 || it.Episode != 1 {
+		t.Errorf("Ryan: %+v", it)
 	}
 	// The name must match: a different show's episode is left alone.
 	if it, _, _ := id.Auto(ctx, store.LocalUserID, tubi("S02:E21 - Somebody Else")); it != nil {

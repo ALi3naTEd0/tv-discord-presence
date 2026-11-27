@@ -144,11 +144,7 @@ func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) 
 				}
 				continue
 			}
-			it, err := id.Item(ctx, Show, show.TMDB, season, episode)
-			if err != nil {
-				return nil, "", err
-			}
-			return &it, ByMatch, nil
+			return id.episodeOf(ctx, userID, show.TMDB, season, episode, epName, "", ByMatch)
 		}
 		// No show name (Tubi): the show you were watching in this app.
 		if id.History != nil && epName != "" {
@@ -157,9 +153,15 @@ func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) 
 				return nil, "", err
 			}
 			if prev != nil && prev.TMDB != 0 {
-				it, err := id.Item(ctx, Show, prev.TMDB, season, episode)
-				if err == nil && it.EpisodeTitle != "" && store.NormalizeTitle(it.EpisodeTitle) == store.NormalizeTitle(epName) {
-					return &it, ByContinuation, nil
+				se, ep, ok, err := id.numberOrName(ctx, prev.TMDB, season, episode, epName, true)
+				if err != nil {
+					return nil, "", err
+				}
+				if ok {
+					it, err := id.Item(ctx, Show, prev.TMDB, se, ep)
+					if err == nil {
+						return &it, ByContinuation, nil
+					}
 				}
 			}
 		}
@@ -231,11 +233,16 @@ func (id *Identifier) Unique(ctx context.Context, n string, k Kind, year int) (*
 }
 
 // episodeOf builds the episode of a known show: by number when the device
-// gave one, else by the episode's name, else (names not listed yet) the
-// episode after your last one, as a guess.
+// gave one (checked against the episode's name when it gave that too), else
+// by the episode's name, else (names not listed yet) the episode after your
+// last one, as a guess.
 func (id *Identifier) episodeOf(ctx context.Context, userID int64, show, season, episode int, epName, fallbackName string, how Method) (*model.Item, Method, error) {
 	if episode > 0 {
-		it, err := id.Item(ctx, Show, show, season, episode)
+		s, e, ok, err := id.numberOrName(ctx, show, season, episode, epName, false)
+		if err != nil || !ok {
+			return nil, "", err
+		}
+		it, err := id.Item(ctx, Show, show, s, e)
 		if err != nil {
 			return nil, "", err
 		}
@@ -244,61 +251,18 @@ func (id *Identifier) episodeOf(ctx context.Context, userID int64, show, season,
 	if epName == "" {
 		epName = fallbackName
 	}
-	t, err := id.Catalog.Get(ctx, Show, show)
+	s, e, found, placeholders, err := id.byName(ctx, show, epName)
 	if err != nil {
 		return nil, "", err
 	}
-	want := store.NormalizeTitle(epName)
-	type ref struct{ s, e int }
-	var named []ref
-	type cand struct {
-		ref
-		name string
-	}
-	var all []cand
-	placeholders := true
-	for _, se := range t.Seasons {
-		if se.Episodes == 0 {
-			continue
-		}
-		eps, err := id.Catalog.Season(ctx, show, se.Number)
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			return nil, "", err
-		}
-		for _, e := range eps {
-			if !rePlaceholder.MatchString(e.Name) {
-				placeholders = false
-				all = append(all, cand{ref{se.Number, e.Number}, store.NormalizeTitle(e.Name)})
-			}
-			if want != "" && store.NormalizeTitle(e.Name) == want {
-				named = append(named, ref{se.Number, e.Number})
-			}
-		}
-	}
-	if len(named) == 0 && want != "" && !placeholders {
-		// apps and TMDB word titles slightly differently ("In Your Own Time" / "In Your
-		// Time"): take the closest name when it is clearly close and clearly ahead of the rest
-		best, second, at := 0.0, 0.0, ref{}
-		for _, c := range all {
-			r := titleSimilarity(want, c.name)
-			if r > best {
-				best, second, at = r, best, c.ref
-			} else if r > second {
-				second = r
-			}
-		}
-		if best >= 0.8 && second < best-0.1 {
-			named = append(named, at)
-		}
-	}
-	if len(named) == 1 {
-		it, err := id.Item(ctx, Show, show, named[0].s, named[0].e)
+	if found {
+		it, err := id.Item(ctx, Show, show, s, e)
 		if err != nil {
 			return nil, "", err
 		}
 		return &it, how, nil
 	}
-	if len(named) > 1 || !placeholders {
+	if !placeholders {
 		return nil, "", nil // the name is ambiguous, or not this show's
 	}
 	// The show lists no episode names yet: guess the one after your last.
@@ -320,6 +284,98 @@ func (id *Identifier) episodeOf(ctx context.Context, userID int64, show, season,
 		return nil, "", nil
 	}
 	return &it, ByProgress, nil
+}
+
+// numberOrName resolves what an app published as "S03:E02 - Kim". Apps
+// number episodes their own way (Tubi's S3E2 "Kim" is S3E3 on TMDB), so the
+// name wins when it names one episode: in the app's season first (common
+// names like "Ryan" repeat across seasons), then in the whole show. The
+// number is trusted alone only with no name to check, or while the show
+// lists no names yet. needName: the show itself is a guess (the one last
+// watched in the app), so the name must match.
+func (id *Identifier) numberOrName(ctx context.Context, show, season, episode int, epName string, needName bool) (int, int, bool, error) {
+	want := store.NormalizeTitle(epName)
+	if want == "" {
+		return season, episode, !needName, nil
+	}
+	eps, err := id.Catalog.Season(ctx, show, season)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return 0, 0, false, err
+	}
+	var hits []int
+	for _, e := range eps {
+		if store.NormalizeTitle(e.Name) == want {
+			hits = append(hits, e.Number)
+		}
+	}
+	if len(hits) == 1 {
+		return season, hits[0], true, nil
+	}
+	s, e, found, placeholders, err := id.byName(ctx, show, epName)
+	switch {
+	case err != nil:
+		return 0, 0, false, err
+	case found:
+		return s, e, true, nil
+	case placeholders && !needName:
+		return season, episode, true, nil
+	}
+	return 0, 0, false, nil
+}
+
+// byName finds the one episode of a show called name: exactly, or clearly
+// closest when apps and TMDB word it differently ("In Your Own Time" / "In
+// Your Time"). placeholders: the show lists no episode names yet.
+func (id *Identifier) byName(ctx context.Context, show int, name string) (season, episode int, found, placeholders bool, err error) {
+	t, err := id.Catalog.Get(ctx, Show, show)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	want := store.NormalizeTitle(name)
+	type ref struct{ s, e int }
+	type cand struct {
+		ref
+		name string
+	}
+	var named []ref
+	var all []cand
+	placeholders = true
+	for _, se := range t.Seasons {
+		if se.Episodes == 0 {
+			continue
+		}
+		eps, err := id.Catalog.Season(ctx, show, se.Number)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return 0, 0, false, false, err
+		}
+		for _, e := range eps {
+			if !rePlaceholder.MatchString(e.Name) {
+				placeholders = false
+				all = append(all, cand{ref{se.Number, e.Number}, store.NormalizeTitle(e.Name)})
+			}
+			if want != "" && store.NormalizeTitle(e.Name) == want {
+				named = append(named, ref{se.Number, e.Number})
+			}
+		}
+	}
+	if len(named) == 0 && want != "" && !placeholders {
+		best, second, at := 0.0, 0.0, ref{}
+		for _, c := range all {
+			r := titleSimilarity(want, c.name)
+			if r > best {
+				best, second, at = r, best, c.ref
+			} else if r > second {
+				second = r
+			}
+		}
+		if best >= 0.8 && second < best-0.1 {
+			named = append(named, at)
+		}
+	}
+	if len(named) == 1 {
+		return named[0].s, named[0].e, true, false, nil
+	}
+	return 0, 0, false, placeholders, nil
 }
 
 // titleSimilarity is 1 for equal normalized titles, 0.85 when one title's
