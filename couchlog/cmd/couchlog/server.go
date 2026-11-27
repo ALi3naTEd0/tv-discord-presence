@@ -104,6 +104,7 @@ func serverCmd(ctx context.Context, args []string, stderr io.Writer) error {
 	log.Info("couchlog server", "version", version, "db", dbPath, "devices", len(cfg.Devices), "sinks", cfg.Sinks)
 	srv := server.New(cfg, st, log)
 	srv.DataDir = filepath.Dir(dbPath)
+	srv.Version = version
 	return srv.Run(ctx)
 }
 

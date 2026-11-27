@@ -6,11 +6,15 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"sync"
 	"time"
 
+	"github.com/ALi3naTEd0/couchlog/internal/api"
 	"github.com/ALi3naTEd0/couchlog/internal/config"
 	"github.com/ALi3naTEd0/couchlog/internal/deliver"
 	"github.com/ALi3naTEd0/couchlog/internal/engine"
@@ -38,6 +42,8 @@ type Server struct {
 	// DataDir holds what Couchlog keeps next to its database (the saved
 	// Netflix session).
 	DataDir string
+	// Version is shown by the dashboard.
+	Version string
 
 	mu        sync.Mutex
 	splitDone map[string]bool // Netflix splits already made (session/entry)
@@ -151,6 +157,14 @@ func (s *Server) Run(ctx context.Context) error {
 				defer wg.Done()
 				s.importPlex(ctx, c, p.ImportDays)
 			}()
+		}
+	}
+	if addr := s.Config.Listen; addr != "off" {
+		if addr == "" {
+			addr = config.DefaultListen
+		}
+		if err := s.serveHTTP(ctx, &wg, addr); err != nil {
+			s.Log.Error("dashboard not served", "addr", addr, "err", err)
 		}
 	}
 	if mode := s.Config.Presence; mode == "on" || mode == "dry-run" {
@@ -518,4 +532,31 @@ func (s *Server) splitNetflix(ctx context.Context, c *netflix.Client, viewed []n
 	}
 	s.Log.Info("Netflix moved on to another title", "session", sess.ID, "new", ns.ID, "title", it.Title, "season", it.Season, "episode", it.Episode)
 	return 1
+}
+
+// serveHTTP serves the dashboard's API on addr until ctx ends.
+func (s *Server) serveHTTP(ctx context.Context, wg *sync.WaitGroup, addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	a := &api.API{Store: s.Store, Version: s.Version, Sinks: s.Config.Sinks, ReadOnly: s.Config.ReadOnly,
+		Log: s.Log.With("part", "api")}
+	hs := &http.Server{Handler: a.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	s.Log.Info("dashboard API", "url", "http://"+ln.Addr().String()+"/api/v1/status")
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		if err := hs.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.Log.Error("dashboard stopped", "err", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		<-ctx.Done()
+		sc, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		hs.Shutdown(sc)
+	}()
+	return nil
 }

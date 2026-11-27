@@ -61,7 +61,13 @@ type Config struct {
 	// DiscordClientID is the Discord application shown ("Watching …");
 	// "" = Couchlog's own, built in.
 	DiscordClientID string `toml:"discord_client_id"`
+	// Listen is where the dashboard and its API are served; "" =
+	// 127.0.0.1:7791 (this computer only), "off" = not served.
+	Listen string `toml:"listen"`
 }
+
+// DefaultListen is the dashboard's address when the settings name none.
+const DefaultListen = "127.0.0.1:7791"
 
 // Service is a destination's credentials.
 type Service struct {
