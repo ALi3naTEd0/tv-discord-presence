@@ -84,7 +84,7 @@
 </div>
 
 <style>
-  .content { padding: 36px 40px 56px; max-width: 1200px; display: flex; flex-direction: column; gap: 36px; }
+  .content { padding: 36px 40px 56px; max-width: 1200px; width: 100%; margin: 0 auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px; }
   .cols { display: flex; flex-wrap: wrap; gap: 28px; }
   .main { flex: 999 1 460px; min-width: 0; }
   aside { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }

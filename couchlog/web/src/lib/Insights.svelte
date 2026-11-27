@@ -125,7 +125,7 @@
 </div>
 
 <style>
-  .page { padding: 32px 40px 56px; max-width: 1180px; display: flex; flex-direction: column; gap: 24px; }
+  .page { padding: 32px 40px 56px; max-width: 1200px; width: 100%; margin: 0 auto; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px; }
   header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
   h1 { margin: 0; font-size: 34px; }
   .sub { margin-top: 6px; font-size: 14px; color: var(--muted); }

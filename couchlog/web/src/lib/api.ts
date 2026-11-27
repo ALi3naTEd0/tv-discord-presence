@@ -59,6 +59,7 @@ export interface Status {
   read_only: boolean
   devices: { id: number; kind: string; name: string }[]
   identify: boolean
+  discord: 'on' | 'dry-run' | 'off'
 }
 
 export interface ServiceInfo { key: string; name: string; free?: 'library' | 'free' | 'ads' }

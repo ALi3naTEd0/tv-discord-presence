@@ -29,7 +29,7 @@
         <div class="row">
           <div class="thumb">{#if it?.poster}<img src={it.poster} alt="" loading="lazy" />{/if}</div>
           <div class="text">
-            <div class="title">{titleOf(s)}{#if it && episodeLine(it)}<span class="sub"> · {episodeLine(it)}</span>{/if}</div>
+            <div class="title">{titleOf(s)}{#if it && episodeLine(it)}<span class="sub">{` · ${episodeLine(it)}`}</span>{/if}</div>
             <div class="meta">
               <Logo slug={slugFor(s.app.id, s.app.name)} size={18} fallback={s.app.name} />
               {s.app.name} · {time(s.started_at)} · {minutes(s.played_secs)}

@@ -46,7 +46,7 @@
           <span class="state">{deviceState(d.id)}</span>
         </div>
       {/each}
-      {#if app.status.sinks.length}
+      {#if app.status.sinks.length || app.status.discord !== 'off'}
         <div class="label">Sends to</div>
         {#each app.status.sinks as k (k)}
           <div class="dev">
@@ -55,6 +55,11 @@
             {#if app.status.read_only}<span class="state" title="Checks only while the old dashboard sends">check only</span>{/if}
           </div>
         {/each}
+        <div class="dev" title={app.status.discord === 'dry-run' ? 'Worked out but not shown: the old dashboard shows your Discord status for now' : app.status.discord === 'on' ? 'What you watch shows as your Discord status' : 'Discord status is off'}>
+          <Logo slug="discord" size={24} fallback="Discord" />
+          <span class="grow">Discord</span>
+          <span class="state">{app.status.discord === 'on' ? 'status' : app.status.discord === 'dry-run' ? 'preview only' : 'off'}</span>
+        </div>
       {/if}
       <div class="ver">{app.status.version}</div>
     </div>

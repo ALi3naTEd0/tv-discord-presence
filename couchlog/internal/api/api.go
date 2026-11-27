@@ -27,6 +27,7 @@ type API struct {
 	Version  string
 	Sinks    []string // destinations set up ("trakt", "simkl")
 	ReadOnly bool
+	Presence string // Discord status: on | dry-run | off
 	Log      *slog.Logger
 	Now      func() time.Time // tests set it
 }
@@ -66,6 +67,9 @@ type Status struct {
 	ReadOnly   bool      `json:"read_only"`
 	Devices    []Device  `json:"devices"`
 	Identify   bool      `json:"identify"` // search and identify work (a TMDB key is set)
+	// Discord is the Discord status: "on" (shown), "dry-run" (worked out,
+	// not shown, while the old dashboard owns it) or "off".
+	Discord string `json:"discord"`
 }
 
 // Device is a TV, box or server.
@@ -82,7 +86,10 @@ func (a *API) status(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := Status{Version: a.Version, ServerTime: a.now(), Sinks: a.Sinks, ReadOnly: a.ReadOnly, Devices: []Device{},
-		Identify: a.Ident != nil}
+		Identify: a.Ident != nil, Discord: a.Presence}
+	if st.Discord == "" {
+		st.Discord = "off"
+	}
 	if st.Sinks == nil {
 		st.Sinks = []string{}
 	}

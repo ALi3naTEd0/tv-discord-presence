@@ -20,6 +20,7 @@
 
 <section class="hero" aria-label="Now playing" style:--poster={it?.poster ? `url("${it.poster}")` : 'none'}>
   <div class="veil"></div>
+  <div class="inner">
   <header>
     <div class="when">
       {#if session}<span class="live"><span class="dot"></span>NOW PLAYING</span>{/if}
@@ -78,11 +79,13 @@
       <p>When the TV, the box or Plex plays something, it shows up here.</p>
     </div>
   {/if}
+  </div>
 </section>
 
 <style>
   .hero { position: relative; overflow: hidden; background: #241a2c; border-bottom: 1px solid #2e2236;
-    padding: 28px 40px 40px; display: flex; flex-direction: column; gap: 28px; isolation: isolate; }
+    padding: 28px 40px 40px; isolation: isolate; }
+  .inner { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
   .hero::before { content: ''; position: absolute; inset: -40px; z-index: -2; background: var(--poster) center / cover;
     filter: blur(48px) saturate(1.3); opacity: 0.55; transform: scale(1.1); }
   .veil { position: absolute; inset: 0; z-index: -1;
