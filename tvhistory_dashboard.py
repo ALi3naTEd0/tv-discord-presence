@@ -1328,7 +1328,15 @@ def auto_loop() -> None:
                 print(f"Posters: {n} filled", flush=True)
         except Exception as e:
             print(f"Posters: {e}", flush=True)
-        time.sleep(30)   # sends within half a minute of a session ending
+        # sends within half a minute of a session ending; meanwhile, a session that just
+        # published a title is identified within seconds (before you reach for Identify)
+        for _ in range(10):
+            time.sleep(3)
+            try:
+                if fresh_hints():
+                    auto_identify()
+            except Exception as e:
+                print(f"Auto-identify: {e}", flush=True)
         try:
             auto_push()
         except Exception as e:
@@ -2013,6 +2021,16 @@ def auto_identify_session(conn, sess):
 
 GUESS_NOTE = ("Episode guessed from your progress (the series has no episode names yet): "
               "confirm it with Identify to send it")
+
+
+def fresh_hints() -> bool:
+    """An open session with a title the rules have not tried yet (cheap: one query)."""
+    conn = db.connect()
+    rows = conn.execute(
+        "SELECT id, hint_title, hint_extra FROM sessions WHERE state='open' AND source <> 'plex' AND ignored = 0"
+        " AND COALESCE(hint_title, '') <> '' AND id NOT IN (SELECT session_id FROM items)").fetchall()
+    conn.close()
+    return any((r["id"], r["hint_title"], r["hint_extra"]) not in AUTO_TRIED for r in rows)
 
 
 def auto_identify() -> int:
