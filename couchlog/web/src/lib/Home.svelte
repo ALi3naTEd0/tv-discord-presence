@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, type Insights, type UpNext as Next } from './api'
-  import { identify, setHidden } from './actions'
+  import { confirmGuess, identify, setHidden } from './actions'
   import { clock } from './clock.svelte'
   import { serviceColor } from './colors'
   import { hrs, minutes, time, titleOf } from './format'
@@ -9,7 +9,7 @@
   import NowPlaying from './NowPlaying.svelte'
   import Today from './Today.svelte'
   import UpNext from './UpNext.svelte'
-  import { app, go, sendProblems, toIdentify } from './store.svelte'
+  import { app, go, guesses, sendProblems, toIdentify } from './store.svelte'
 
   let next = $state<Next[]>([])
   let month = $state<Insights>()
@@ -21,7 +21,8 @@
     const start = new Date(clock.now); start.setHours(0, 0, 0, 0)
     return app.history.filter(s => s.hidden !== 'ignored' && Date.parse(s.started_at) >= start.getTime())
   })
-  const needs = $derived([...toIdentify(app.history), ...sendProblems(app.history)].slice(0, 4))
+  const needs = $derived([...guesses(app.history), ...toIdentify(app.history), ...sendProblems(app.history)]
+    .filter((s, i, all) => all.findIndex(x => x.id === s.id) === i).slice(0, 4))
   const top = $derived(month ? Math.max(...month.services.map(s => s.hours), 1) : 1)
 
   onMount(() => {
@@ -53,15 +54,23 @@
             <div class="q">
               <div class="qt">{titleOf(s)}</div>
               <div class="why">
-                {#if !s.items.length}
+                {#if s.items.some(i => i.guessed)}
+                  {@const g = s.items.find(i => i.guessed)!}
+                  {s.app.name} didn't say which episode: S{g.season} · E{g.episode} is a guess from your progress
+                {:else if !s.items.length}
                   {s.app.name} · {time(s.started_at)} · {minutes(s.played_secs)} · not identified
                 {:else}
                   Could not be sent: {Object.entries(s.items[0].deliveries).filter(([, d]) => d.status === 'error' || d.status === 'not_found').map(([k, d]) => `${k} ${d.status === 'not_found' ? 'does not list it yet' : 'failed'}`).join(', ')}
                 {/if}
               </div>
               <div class="btns">
-                <button class="yes" onclick={() => identify(s)}>{s.items.length ? 'Change' : 'Identify'}</button>
-                <button class="no" onclick={() => setHidden(s, true)}>Hide</button>
+                {#if s.items.some(i => i.guessed)}
+                  <button class="yes" onclick={() => confirmGuess(s)}>Yes, send it</button>
+                  <button class="no" onclick={() => identify(s)}>Change</button>
+                {:else}
+                  <button class="yes" onclick={() => identify(s)}>{s.items.length ? 'Change' : 'Identify'}</button>
+                {/if}
+                {#if !s.items.some(i => i.guessed)}<button class="no" onclick={() => setHidden(s, true)}>Hide</button>{/if}
               </div>
             </div>
           {/each}

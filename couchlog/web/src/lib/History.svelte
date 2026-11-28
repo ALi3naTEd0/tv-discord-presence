@@ -6,7 +6,7 @@
   import { current, dayLabel, deliveryWord, episodeLine, minutes, sinkName, time, titleOf } from './format'
   import { slugFor } from './logos'
   import Logo from './Logo.svelte'
-  import { app, toIdentify } from './store.svelte'
+  import { app, guesses, toIdentify } from './store.svelte'
 
   type Tab = 'all' | 'identify' | 'unsent' | 'sent' | 'hidden'
   let tab = $state<Tab>((sessionStorage.getItem('history-tab') as Tab) || 'all')
@@ -29,7 +29,7 @@
   })
   const groups: Record<Tab, (s: Session) => boolean> = {
     all: s => !s.hidden,
-    identify: s => toIdentify([s]).length > 0,
+    identify: s => toIdentify([s]).length > 0 || guesses([s]).length > 0,
     unsent: s => !s.hidden && !s.open && s.items.length > 0 && !sent(s),
     sent: s => !s.hidden && sent(s),
     hidden: s => !!s.hidden,
@@ -57,6 +57,8 @@
   function note(s: Session): { text: string; tone: 'info' | 'warn' | 'muted' } | undefined {
     if (s.hidden === 'short') return { text: 'Hidden: shorter than this app counts', tone: 'muted' }
     if (s.hidden === 'ignored') return { text: 'Hidden by you', tone: 'muted' }
+    const g = s.items.find(i => i.guessed)
+    if (g) return { text: `Guessed from your progress: confirm S${g.season} E${g.episode} (menu → Change) to send it`, tone: 'warn' }
     if (!s.items.length && s.hint?.title) return { text: `The app said “${s.hint.title}”${s.hint.subtitle ? ` · ${s.hint.subtitle}` : ''}`, tone: 'warn' }
     if (!s.items.length) return { text: 'The app did not say what it was', tone: 'warn' }
     // why it was not sent, once per distinct reason ("Watched 46%…" is the same for Trakt and Simkl)

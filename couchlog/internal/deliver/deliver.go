@@ -69,6 +69,11 @@ func WatchedTimes(w store.Watch) map[int64]int64 {
 // already marked its plays as watched; TV sessions need most of the
 // runtime watched (a real runtime, not an estimate).
 func (d *Deliverer) Eligible(w store.Watch) (bool, string) {
+	for _, it := range w.Items {
+		if it.Guessed {
+			return false, "Episode guessed from your progress: confirm it with Identify to send it"
+		}
+	}
 	if w.DeviceKind == "plex" {
 		return true, ""
 	}

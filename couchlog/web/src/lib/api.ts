@@ -25,6 +25,7 @@ export interface Item {
   poster?: string
   runtime_min?: number
   runtime_estimated?: boolean
+  guessed?: boolean
   ids: { tmdb?: number; tvdb?: number; imdb?: string }
   links: Link[]
   deliveries: Record<string, Delivery>

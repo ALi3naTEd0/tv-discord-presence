@@ -72,6 +72,7 @@ type Item struct {
 	Poster       string              `json:"poster,omitempty"`
 	RuntimeMin   int                 `json:"runtime_min,omitempty"`
 	RuntimeEst   bool                `json:"runtime_estimated,omitempty"`
+	Guessed      bool                `json:"guessed,omitempty"` // a guess from your progress: confirm to send
 	IDs          IDs                 `json:"ids"`
 	Links        []Link              `json:"links"`
 	Deliveries   map[string]Delivery `json:"deliveries"`
@@ -121,7 +122,7 @@ func (a *API) view(ctx context.Context, s *model.Session, devs map[int64]store.D
 		}
 		iv := Item{ID: it.ID, Kind: string(it.Kind), Title: it.Title, Year: it.Year, Season: it.Season,
 			Episode: it.Episode, EpisodeTitle: it.EpisodeTitle, Poster: it.Poster, RuntimeMin: it.RuntimeMinutes,
-			RuntimeEst: it.RuntimeEstimated, IDs: IDs{TMDB: it.TMDB, TVDB: it.TVDB, IMDb: it.IMDb},
+			RuntimeEst: it.RuntimeEstimated, Guessed: it.Guessed, IDs: IDs{TMDB: it.TMDB, TVDB: it.TVDB, IMDb: it.IMDb},
 			Links: LinksOf(it.Identity), Deliveries: map[string]Delivery{}}
 		for _, dl := range dels {
 			iv.Deliveries[dl.Sink] = Delivery{Status: string(dl.Status), Error: dl.Error, UpdatedAt: dl.UpdatedAt}

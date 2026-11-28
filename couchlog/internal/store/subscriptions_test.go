@@ -101,3 +101,34 @@ func TestEnsureDeliveriesForTitlesFromBeforeASink(t *testing.T) {
 		t.Errorf("added again: %d", n)
 	}
 }
+
+func TestGuessesStayUnsentUntilConfirmed(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now()
+	dev, _ := s.EnsureDevice(ctx, LocalUserID, "androidtv", "Box", "")
+	sess, _ := s.StartSession(ctx, dev, model.App{ID: "com.disney.disneyplus"}, "", now.Add(-time.Hour))
+	guess := model.Item{Identity: model.Identity{Kind: model.KindEpisode, Title: "Get Huge", TMDB: 340053, Season: 1, Episode: 2}, Guessed: true}
+	s.Identify(ctx, sess.ID, []model.Item{guess}, []string{"trakt"}, now)
+	if n, _ := s.EnsureDeliveries(ctx, []string{"trakt"}, now.AddDate(0, 0, -60), now); n != 0 {
+		t.Errorf("a guess got %d deliveries", n)
+	}
+	items, _ := s.Items(ctx, sess.ID)
+	if len(items) != 1 || !items[0].Guessed {
+		t.Fatalf("%+v", items)
+	}
+	// you confirm it: the same title identified by you
+	guess.Guessed = false
+	s.Identify(ctx, sess.ID, []model.Item{guess}, []string{"trakt"}, now)
+	items, _ = s.Items(ctx, sess.ID)
+	if items[0].Guessed {
+		t.Error("still a guess after confirming")
+	}
+	if n, _ := s.EnsureDeliveries(ctx, []string{"trakt"}, now.AddDate(0, 0, -60), now); n != 1 {
+		t.Errorf("confirmed item got %d deliveries", n)
+	}
+}

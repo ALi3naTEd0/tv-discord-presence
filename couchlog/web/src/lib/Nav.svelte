@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { app, go, toIdentify, type Route } from './store.svelte'
+  import { app, go, guesses, toIdentify, type Route } from './store.svelte'
   import { sinkName } from './format'
   import Logo from './Logo.svelte'
 
-  const count = $derived(toIdentify(app.history).length)
+  const count = $derived(toIdentify(app.history).length + guesses(app.history).length)
   const STATE: Record<string, string> = { playing: 'Playing', paused: 'Paused', idle: 'On', off: 'Off', waiting: 'Not connected' }
   function deviceState(id: number) {
     const d = app.status?.devices.find(x => x.id === id)

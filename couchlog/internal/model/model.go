@@ -113,9 +113,12 @@ type Item struct {
 	SessionID int64
 	Identity
 	Poster           string
-	RuntimeMinutes   int        // from TMDB, 0 if unknown
-	RuntimeEstimated bool       // borrowed from another listing
-	ReplacedAt       *time.Time // a correction replaced it; nil for current items
+	RuntimeMinutes   int  // from TMDB, 0 if unknown
+	RuntimeEstimated bool // borrowed from another listing
+	// Guessed: the episode is a guess (the one after your last), never sent
+	// until you confirm it by identifying the session.
+	Guessed    bool
+	ReplacedAt *time.Time // a correction replaced it; nil for current items
 }
 
 // SameTitle reports whether two identities are the same movie or episode,

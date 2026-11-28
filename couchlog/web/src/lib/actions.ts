@@ -12,3 +12,17 @@ export async function setHidden(s: Session, hidden: boolean) {
     toast(`Could not change it: ${(e as Error).message}`)
   }
 }
+
+/** Confirm a guessed episode as it is: it goes to Trakt and Simkl like any other. */
+export async function confirmGuess(s: Session) {
+  const it = s.items.find(i => i.guessed)
+  if (!it?.ids.tmdb) return identify(s)
+  try {
+    replaceSession(await api.identify(s.id, it.kind === 'movie'
+      ? { kind: 'movie', tmdb: it.ids.tmdb }
+      : { kind: 'tv', tmdb: it.ids.tmdb, season: it.season, episodes: s.items.filter(i => i.kind === 'episode').map(i => i.episode!) }))
+    toast(`Confirmed: ${it.title}${it.season ? ` S${it.season} E${it.episode}` : ''}`)
+  } catch (e) {
+    toast(`Not confirmed: ${(e as Error).message}`)
+  }
+}

@@ -62,9 +62,10 @@ func identifyTx(ctx context.Context, tx *sql.Tx, sessionID int64, items []model.
 		if match >= 0 {
 			kept[match] = true
 			n := items[match]
+			// the same title again: identifying it yourself confirms a guess
 			if _, err := tx.ExecContext(ctx, `UPDATE items SET title = ?, year = ?, episode_title = ?,
-				tmdb = ?, tvdb = ?, imdb = ?, poster = COALESCE(NULLIF(?, ''), poster) WHERE id = ?`,
-				n.Title, nullInt(n.Year), n.EpisodeTitle, nullInt(n.TMDB), nullInt(n.TVDB), n.IMDb, n.Poster, o.ID); err != nil {
+				tmdb = ?, tvdb = ?, imdb = ?, poster = COALESCE(NULLIF(?, ''), poster), guessed = ? WHERE id = ?`,
+				n.Title, nullInt(n.Year), n.EpisodeTitle, nullInt(n.TMDB), nullInt(n.TVDB), n.IMDb, n.Poster, n.Guessed, o.ID); err != nil {
 				return fmt.Errorf("store: %w", err)
 			}
 			continue
@@ -96,14 +97,17 @@ func identifyTx(ctx context.Context, tx *sql.Tx, sessionID int64, items []model.
 			continue
 		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO items(session_id, kind, title, year, season, episode,
-			episode_title, tmdb, tvdb, imdb, poster, runtime_min, runtime_estimated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			episode_title, tmdb, tvdb, imdb, poster, runtime_min, runtime_estimated, guessed) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			sessionID, string(it.Kind), it.Title, nullInt(it.Year), nullInt(it.Season), nullInt(it.Episode),
 			it.EpisodeTitle, nullInt(it.TMDB), nullInt(it.TVDB), it.IMDb, it.Poster, nullInt(it.RuntimeMinutes),
-			it.RuntimeEstimated)
+			it.RuntimeEstimated, it.Guessed)
 		if err != nil {
 			return fmt.Errorf("store: %w", err)
 		}
 		id, _ := res.LastInsertId()
+		if it.Guessed {
+			continue // nowhere until you confirm it
+		}
 		for _, sk := range sinks {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO deliveries(item_id, sink, updated_at) VALUES (?,?,?)",
 				id, sk, ms(now)); err != nil {
@@ -163,7 +167,7 @@ func (s *Store) DeliveryOf(ctx context.Context, itemID int64, sink string) (mode
 
 func currentItems(ctx context.Context, tx *sql.Tx, sessionID int64) ([]model.Item, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, kind, title, year, season, episode, episode_title,
-		tmdb, tvdb, imdb, poster, runtime_min, runtime_estimated FROM items
+		tmdb, tvdb, imdb, poster, runtime_min, runtime_estimated, guessed FROM items
 		WHERE session_id = ? AND replaced_at IS NULL ORDER BY COALESCE(season, 0), COALESCE(episode, 0), id`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("store: %w", err)
@@ -177,7 +181,7 @@ func currentItems(ctx context.Context, tx *sql.Tx, sessionID int64) ([]model.Ite
 			year, season, episode, tmdb, tvdb, runtime sql.NullInt64
 		)
 		if err := rows.Scan(&it.ID, &kind, &it.Title, &year, &season, &episode, &it.EpisodeTitle,
-			&tmdb, &tvdb, &it.IMDb, &it.Poster, &runtime, &it.RuntimeEstimated); err != nil {
+			&tmdb, &tvdb, &it.IMDb, &it.Poster, &runtime, &it.RuntimeEstimated, &it.Guessed); err != nil {
 			return nil, fmt.Errorf("store: %w", err)
 		}
 		it.SessionID, it.Kind = sessionID, model.ItemKind(kind)

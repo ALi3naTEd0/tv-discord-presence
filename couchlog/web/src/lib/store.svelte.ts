@@ -56,3 +56,8 @@ export function sendProblems(list: Session[]) {
   return list.filter(s => !s.hidden && s.items.some(it =>
     Object.values(it.deliveries).some(d => d.status === 'error' || d.status === 'not_found')))
 }
+
+/** Sessions whose episode is a guess from your progress, waiting for you to confirm it. */
+export function guesses(list: Session[]) {
+  return list.filter(s => !s.hidden && s.items.some(it => it.guessed))
+}

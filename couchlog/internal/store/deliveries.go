@@ -249,7 +249,7 @@ func (s *Store) EnsureDeliveries(ctx context.Context, sinks []string, since, now
 	for _, sk := range sinks {
 		res, err := s.db.ExecContext(ctx, `INSERT INTO deliveries(item_id, sink, status, updated_at)
 			SELECT i.id, ?, 'pending', ? FROM items i JOIN sessions s ON s.id = i.session_id
-			WHERE i.replaced_at IS NULL AND s.started_at > ?
+			WHERE i.replaced_at IS NULL AND i.guessed = 0 AND s.started_at > ?
 			AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.item_id = i.id AND d.sink = ?)`,
 			sk, ms(now), ms(since), sk)
 		if err != nil {

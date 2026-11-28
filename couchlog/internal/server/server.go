@@ -315,9 +315,7 @@ func (s *Server) autoIdentify(ctx context.Context, sess *model.Session) {
 		return
 	}
 	sinks := s.Config.Sinks
-	if how.Guessed() {
-		sinks = nil // a guessed episode waits for you to confirm it before going anywhere
-	}
+	it.Guessed = how.Guessed() // a guessed episode waits for you to confirm it before going anywhere
 	if err := s.Store.Identify(ctx, sess.ID, []model.Item{*it}, sinks, time.Now()); err != nil {
 		s.Log.Error("identify", "session", sess.ID, "err", err)
 		return
