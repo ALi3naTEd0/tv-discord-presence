@@ -281,3 +281,39 @@ func (c *TMDB) Find(ctx context.Context, id, source string) ([]Title, error) {
 	}
 	return out, nil
 }
+
+// Providers says where a title streams, by country (ISO 3166-1, "MX"):
+// the TMDB ids of services that have it in their subscription, free, or
+// free with ads (TMDB's data comes from JustWatch). Rentals and purchases
+// are left out.
+func (c *TMDB) Providers(ctx context.Context, k Kind, id int) (map[string][]int, error) {
+	var r struct {
+		Results map[string]struct {
+			Flatrate []struct {
+				ID int `json:"provider_id"`
+			} `json:"flatrate"`
+			Free []struct {
+				ID int `json:"provider_id"`
+			} `json:"free"`
+			Ads []struct {
+				ID int `json:"provider_id"`
+			} `json:"ads"`
+		} `json:"results"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/%s/%d/watch/providers", k, id), nil, &r); err != nil {
+		return nil, err
+	}
+	out := map[string][]int{}
+	for region, v := range r.Results {
+		for _, p := range v.Flatrate {
+			out[region] = append(out[region], p.ID)
+		}
+		for _, p := range v.Free {
+			out[region] = append(out[region], p.ID)
+		}
+		for _, p := range v.Ads {
+			out[region] = append(out[region], p.ID)
+		}
+	}
+	return out, nil
+}

@@ -71,7 +71,7 @@ func New(cfg *config.Config, st *store.Store, log *slog.Logger) *Server {
 	}
 	if key != "" {
 		s.Ident = &identify.Identifier{Catalog: &identify.TMDB{Key: key, Language: cfg.Language}, Aliases: st,
-			Posters: &identify.IMDb{}, History: st}
+			Posters: &identify.IMDb{}, History: st, Region: cfg.Country()}
 	} else {
 		log.Warn("no TMDB key (COUCHLOG_TMDB_KEY): sessions are recorded but not identified")
 	}

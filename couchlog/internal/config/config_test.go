@@ -67,3 +67,18 @@ func TestLoadRejectsBadDevice(t *testing.T) {
 		t.Error("unknown kind accepted")
 	}
 }
+
+func TestCountry(t *testing.T) {
+	t.Setenv("TZ", "America/Merida")
+	if _, err := os.Stat("/usr/share/zoneinfo/zone.tab"); err == nil {
+		if c := (&Config{}).Country(); c != "MX" {
+			t.Errorf("from the time zone: %q", c)
+		}
+	}
+	if c := (&Config{Language: "pt-BR"}).Country(); c != "BR" {
+		t.Errorf("from language: %q", c)
+	}
+	if c := (&Config{Region: "us", Language: "es-MX"}).Country(); c != "US" {
+		t.Errorf("region wins: %q", c)
+	}
+}

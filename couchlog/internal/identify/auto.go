@@ -198,6 +198,34 @@ func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) 
 			return id.episodeOf(ctx, userID, show.TMDB, 0, 0, title, title, ByMatch)
 		}
 	}
+
+	// 5. The one title with those words on the app's own service in your
+	// country (localized names TMDB does not list).
+	for _, n := range []string{sub, title} {
+		if n == "" {
+			continue
+		}
+		t, err := id.onService(ctx, s.App.ID, n)
+		if err != nil {
+			return nil, "", err
+		}
+		if t == nil {
+			continue
+		}
+		if t.Kind == Movie {
+			it, err := id.Item(ctx, Movie, t.TMDB, 0, 0)
+			if err != nil {
+				return nil, "", err
+			}
+			return &it, ByService, nil
+		}
+		if n == sub && title != "" {
+			return id.episodeOf(ctx, userID, t.TMDB, 0, 0, title, title, ByService)
+		}
+		// only the show's name: the next episode in order, a guess until
+		// you watch it from the start (see deliver's promotion)
+		return id.guessNext(ctx, userID, t.TMDB)
+	}
 	return nil, "", nil
 }
 

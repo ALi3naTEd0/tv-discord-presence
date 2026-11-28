@@ -38,6 +38,9 @@ type Config struct {
 	Devices  []Device `toml:"device"`
 	Plex     *Plex    `toml:"plex"`
 	Language string   `toml:"language"` // TMDB language, e.g. "es-MX"
+	// Region is your country (ISO 3166-1, "MX"), for where titles stream;
+	// "" = the country in Language ("es-MX" → MX), else the time zone's.
+	Region string `toml:"region"`
 	// Sinks are the services identified titles are sent to ("trakt",
 	// "simkl"). Empty: Couchlog only records (the parallel run).
 	Sinks []string `toml:"sinks"`
@@ -233,4 +236,47 @@ func FromTvpresence(path string) (*Config, error) {
 	c.Simkl = &Service{TokenFile: filepath.Join(home, ".config", "simkl", "token.json")}
 	c.EnvFiles = append(c.EnvFiles, filepath.Join(home, ".config", "simkl", ".env"))
 	return c, nil
+}
+
+// Country is Region, or the country part of Language ("es-MX" → "MX").
+func (c *Config) Country() string {
+	if c.Region != "" {
+		return strings.ToUpper(c.Region)
+	}
+	if i := strings.LastIndex(c.Language, "-"); i > 0 && len(c.Language)-i == 3 {
+		return strings.ToUpper(c.Language[i+1:])
+	}
+	// the computer's time zone: America/Merida → MX (the language is a poor
+	// guide: many systems in Mexico run in English)
+	return zoneCountry()
+}
+
+// zoneCountry is the country of the computer's time zone, from the system's
+// zone.tab (Linux, macOS); "" when it cannot tell.
+func zoneCountry() string {
+	zone := os.Getenv("TZ")
+	if zone == "" {
+		if l, err := os.Readlink("/etc/localtime"); err == nil {
+			if i := strings.Index(l, "zoneinfo/"); i >= 0 {
+				zone = l[i+len("zoneinfo/"):]
+			}
+		}
+	}
+	zone = strings.TrimPrefix(zone, ":")
+	if zone == "" {
+		return ""
+	}
+	for _, tab := range []string{"/usr/share/zoneinfo/zone.tab", "/usr/share/zoneinfo/zone1970.tab"} {
+		b, err := os.ReadFile(tab)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			f := strings.Split(line, "\t")
+			if len(f) >= 3 && f[2] == zone && len(f[0]) == 2 {
+				return f[0]
+			}
+		}
+	}
+	return ""
 }

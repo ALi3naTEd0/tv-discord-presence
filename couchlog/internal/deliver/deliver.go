@@ -65,6 +65,31 @@ func WatchedTimes(w store.Watch) map[int64]int64 {
 	return out
 }
 
+// WatchedInOrder says whether a guessed episode (the next one in order,
+// when the app did not say which) was watched as that: one title with a
+// real runtime, from the start (the furthest point is no more than 3 min
+// past the time played, so nothing was skipped) to 80 %. Binge watching in
+// order is what this is; a wrong one is taken back out by correcting it.
+func (d *Deliverer) WatchedInOrder(w store.Watch) (model.Item, bool) {
+	if len(w.Items) != 1 || !w.Items[0].Guessed || w.Session.Position == nil {
+		return model.Item{}, false
+	}
+	it := w.Items[0]
+	if it.RuntimeMinutes == 0 || it.RuntimeEstimated {
+		return model.Item{}, false
+	}
+	ratio := d.MinRatio
+	if ratio == 0 {
+		ratio = 0.8
+	}
+	runtime := time.Duration(it.RuntimeMinutes) * time.Minute
+	pos, played := *w.Session.Position, w.Session.Played
+	if pos < time.Duration(float64(runtime)*ratio) || pos-played > 3*time.Minute {
+		return model.Item{}, false
+	}
+	return it, true
+}
+
 // Eligible says whether a session is sent on its own, and why not. Plex
 // already marked its plays as watched; TV sessions need most of the
 // runtime watched (a real runtime, not an estimate).
@@ -152,6 +177,24 @@ func (r Report) add(sinkName string, st model.DeliveryStatus) {
 // Run checks and sends what is due, and takes out what corrections replaced.
 func (d *Deliverer) Run(ctx context.Context) (Report, error) {
 	now := d.now()
+	watches, err := d.Store.Watches(ctx, now.AddDate(0, 0, -60), now.Add(-15*time.Second))
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range watches {
+		if it, ok := d.WatchedInOrder(w); ok {
+			if err := d.Store.ConfirmGuess(ctx, it.ID); err != nil {
+				return nil, err
+			}
+			for i := range w.Items {
+				w.Items[i].Guessed = false
+			}
+			if d.Log != nil {
+				d.Log.Info("guessed episode watched from the start: sending it", "session", w.Session.ID,
+					"title", it.Title, "season", it.Season, "episode", it.Episode)
+			}
+		}
+	}
 	names := make([]string, 0, len(d.Sinks))
 	for _, sk := range d.Sinks {
 		names = append(names, sk.Name())
@@ -159,11 +202,7 @@ func (d *Deliverer) Run(ctx context.Context) (Report, error) {
 	if n, err := d.Store.EnsureDeliveries(ctx, names, now.AddDate(0, 0, -60), now); err != nil {
 		return nil, err
 	} else if n > 0 && d.Log != nil {
-		d.Log.Info("titles from before a destination was set up are now checked", "deliveries", n)
-	}
-	watches, err := d.Store.Watches(ctx, now.AddDate(0, 0, -60), now.Add(-15*time.Second))
-	if err != nil {
-		return nil, err
+		d.Log.Info("titles waiting for a destination are now checked", "deliveries", n)
 	}
 	rep := Report{}
 	var errs []error

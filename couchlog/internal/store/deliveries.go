@@ -260,3 +260,9 @@ func (s *Store) EnsureDeliveries(ctx context.Context, sinks []string, since, now
 	}
 	return total, nil
 }
+
+// ConfirmGuess turns a guessed item into a normal one, to be sent like any
+// other (its deliveries come with the next EnsureDeliveries).
+func (s *Store) ConfirmGuess(ctx context.Context, itemID int64) error {
+	return s.exec(ctx, "UPDATE items SET guessed = 0 WHERE id = ?", itemID)
+}

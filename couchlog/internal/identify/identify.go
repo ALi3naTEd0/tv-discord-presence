@@ -49,6 +49,9 @@ type Identifier struct {
 	Posters *IMDb
 	// History lets Auto continue the show you were watching; nil = off.
 	History History
+	// Region is your country (ISO 3166-1, "MX"): Auto narrows a title it
+	// cannot match exactly to what the app's service carries there.
+	Region string
 }
 
 // ErrNeedsEpisode means a show was picked without saying which episode.
@@ -61,6 +64,7 @@ const (
 	ByAlias        Method = "alias"        // the user said so before
 	ByMatch        Method = "match"        // the only exact title match on TMDB (and episode, by number or name)
 	ByContinuation Method = "continuation" // the show you were watching in this app, episode confirmed by name
+	ByService      Method = "service"      // the only title with those words on the app's service in your country
 	ByProgress     Method = "progress"     // the episode is a guess (next after your last one): confirm before sending
 )
 
