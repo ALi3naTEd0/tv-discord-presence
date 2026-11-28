@@ -3,12 +3,16 @@
   let { slug, size = 24, fallback = '' }: { slug?: string; size?: number; fallback?: string } = $props()
   const m = $derived(slug ? MARKS[slug] : undefined)
   const w = $derived(slug && !m ? WORDS[slug] : undefined)
+  // marks are square (24×24) except wordmarks like Disney+'s, kept at their shape
+  const vb = $derived((m?.vb ?? '0 0 24 24').split(' ').map(Number))
+  const iw = $derived(Math.round(size * (m?.k ?? 1)))
+  const ih = $derived(Math.round(iw * vb[3] / vb[2]))
 </script>
 
 {#if m}
   <span class="tile" role="img" aria-label={m.label}
     style:width="{size}px" style:height="{size}px" style:border-radius="{Math.round(size * 0.28)}px" style:background={m.tile}>
-    <svg viewBox="0 0 24 24" width={Math.round(size * m.k)} height={Math.round(size * m.k)} aria-hidden="true"><path d={m.d} fill={m.fill} /></svg>
+    <svg viewBox={m.vb ?? '0 0 24 24'} width={iw} height={ih} aria-hidden="true"><path d={m.d} fill={m.fill} /></svg>
   </span>
 {:else if w}
   <span class="tile word" role="img" aria-label={w.label}

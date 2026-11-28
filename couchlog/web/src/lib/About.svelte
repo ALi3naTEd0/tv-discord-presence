@@ -32,8 +32,9 @@
     <h2>Credits</h2>
     <ul>
       <li>Posters TMDB does not have yet come from IMDb's public pages.</li>
-      <li>Service logos are from <a href="https://simpleicons.org/" target="_blank" rel="noopener noreferrer">Simple Icons</a> (CC0).
-        Netflix, HBO Max, Plex, YouTube, Tubi, Trakt, Simkl, Discord, IMDb and TMDB are trademarks of their owners;
+      <li>Service logos are from <a href="https://simpleicons.org/" target="_blank" rel="noopener noreferrer">Simple Icons</a> (CC0);
+        Disney+'s wordmark from <a href="https://commons.wikimedia.org/wiki/File:Disney%2B_logo.svg" target="_blank" rel="noopener noreferrer">Wikimedia Commons</a>.
+        Netflix, HBO Max, Disney+, Plex, YouTube, Tubi, Trakt, Simkl, Discord, IMDb and TMDB are trademarks of their owners;
         Couchlog is not affiliated with them.</li>
       <li>Fonts: Inter and Space Grotesk (SIL Open Font License).</li>
     </ul>
