@@ -76,6 +76,10 @@ const DefaultListen = "127.0.0.1:7791"
 type Service struct {
 	ClientID  string `toml:"client_id"`  // "" = COUCHLOG_<NAME>_CLIENT_ID, or SIMKL_CLIENT_ID in env files
 	TokenFile string `toml:"token_file"` // JSON with access_token (and expires_at / created_at+expires_in)
+	// RenewCommand is run when the token has expired, so the app that owns
+	// it renews it (a refresh token is single-use; only one app may spend it).
+	// Empty: "trakts auth" when the token belongs to trakt-scrobbler.
+	RenewCommand []string `toml:"renew_command"`
 }
 
 // Load reads a settings file.

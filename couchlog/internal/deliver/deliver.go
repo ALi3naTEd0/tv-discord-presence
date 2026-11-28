@@ -11,7 +11,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ALi3naTEd0/couchlog/internal/config"
@@ -346,7 +349,7 @@ func Sinks(cfg *config.Config) ([]sink.Sink, []error) {
 				errs = append(errs, errors.New("trakt: no client id (COUCHLOG_TRAKT_CLIENT_ID) or token file"))
 				continue
 			}
-			out = append(out, &trakt.Trakt{ClientID: id, Token: tokenFrom(s.TokenFile)})
+			out = append(out, &trakt.Trakt{ClientID: id, Token: tokenFrom(s.TokenFile, renewFor(s))})
 		case "simkl":
 			s := cfg.Simkl
 			if s == nil {
@@ -360,7 +363,7 @@ func Sinks(cfg *config.Config) ([]sink.Sink, []error) {
 				errs = append(errs, errors.New("simkl: no client id (SIMKL_CLIENT_ID) or token file"))
 				continue
 			}
-			out = append(out, &simkl.Simkl{ClientID: id, Token: tokenFrom(s.TokenFile)})
+			out = append(out, &simkl.Simkl{ClientID: id, Token: tokenFrom(s.TokenFile, renewFor(s))})
 		default:
 			errs = append(errs, fmt.Errorf("unknown destination %q", name))
 		}
@@ -368,34 +371,87 @@ func Sinks(cfg *config.Config) ([]sink.Sink, []error) {
 	return out, errs
 }
 
-// tokenFrom reads an OAuth token file. It does not renew tokens: for now
-// they belong to trakt-scrobbler and your Simkl setup, which renew them
-// (a refresh token is single-use; renewing from two places breaks it).
-func tokenFrom(path string) func(context.Context) (string, error) {
-	return func(context.Context) (string, error) {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return "", err
+// tokenFrom reads an OAuth token file. Couchlog never spends the refresh
+// token itself: the token belongs to another app (trakt-scrobbler, your
+// Simkl setup) and a refresh token is single-use. When the token has
+// expired it runs renew, which asks that app to renew it, then reads again.
+func tokenFrom(path string, renew []string) func(context.Context) (string, error) {
+	var (
+		mu   sync.Mutex
+		last time.Time // renew at most every 10 minutes
+	)
+	return func(ctx context.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		tok, expired, err := readToken(path)
+		if !expired || len(renew) == 0 || time.Since(last) < 10*time.Minute {
+			return tok, err
 		}
-		var t struct {
-			AccessToken string  `json:"access_token"`
-			ExpiresAt   float64 `json:"expires_at"`
-			CreatedAt   float64 `json:"created_at"`
-			ExpiresIn   float64 `json:"expires_in"`
+		last = time.Now()
+		rctx, cancel := context.WithTimeout(ctx, time.Minute)
+		defer cancel()
+		cmd := exec.CommandContext(rctx, renew[0], renew[1:]...)
+		cmd.Stdin = nil // never wait on a prompt
+		if out, rerr := cmd.CombinedOutput(); rerr != nil {
+			slog.Warn("token renew", "cmd", strings.Join(renew, " "), "err", rerr, "out", lastLine(out))
+			return tok, err
 		}
-		if err := json.Unmarshal(b, &t); err != nil {
-			return "", fmt.Errorf("%s: %w", path, err)
-		}
-		exp := t.ExpiresAt
-		if exp == 0 && t.CreatedAt > 0 && t.ExpiresIn > 0 {
-			exp = t.CreatedAt + t.ExpiresIn
-		}
-		if exp > 0 && float64(time.Now().Unix()) > exp {
-			return "", fmt.Errorf("token in %s expired; the app that owns it renews it on its next use", path)
-		}
-		if strings.TrimSpace(t.AccessToken) == "" {
-			return "", fmt.Errorf("no access_token in %s", path)
-		}
-		return t.AccessToken, nil
+		slog.Info("token renewed", "file", path, "by", strings.Join(renew, " "))
+		tok, _, err = readToken(path)
+		return tok, err
 	}
+}
+
+func readToken(path string) (tok string, expired bool, err error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, err
+	}
+	var t struct {
+		AccessToken string  `json:"access_token"`
+		ExpiresAt   float64 `json:"expires_at"`
+		CreatedAt   float64 `json:"created_at"`
+		ExpiresIn   float64 `json:"expires_in"`
+	}
+	if err := json.Unmarshal(b, &t); err != nil {
+		return "", false, fmt.Errorf("%s: %w", path, err)
+	}
+	exp := t.ExpiresAt
+	if exp == 0 && t.CreatedAt > 0 && t.ExpiresIn > 0 {
+		exp = t.CreatedAt + t.ExpiresIn
+	}
+	if exp > 0 && float64(time.Now().Unix()) > exp {
+		return "", true, fmt.Errorf("token in %s expired; the app that owns it renews it on its next use", path)
+	}
+	if strings.TrimSpace(t.AccessToken) == "" {
+		return "", false, fmt.Errorf("no access_token in %s", path)
+	}
+	return t.AccessToken, false, nil
+}
+
+// renewFor is the command that renews s's token: renew_command, or
+// "trakts auth" for a trakt-scrobbler token (it renews an expired token
+// without asking anything, and is a no-op while the token is valid).
+func renewFor(s *config.Service) []string {
+	if len(s.RenewCommand) > 0 {
+		return s.RenewCommand
+	}
+	if !strings.Contains(s.TokenFile, "trakt-scrobbler") {
+		return nil
+	}
+	if p, err := exec.LookPath("trakts"); err == nil {
+		return []string{p, "auth"}
+	}
+	if home, err := os.UserHomeDir(); err == nil { // pipx; systemd's PATH lacks ~/.local/bin
+		p := filepath.Join(home, ".local", "bin", "trakts")
+		if _, err := os.Stat(p); err == nil {
+			return []string{p, "auth"}
+		}
+	}
+	return nil
+}
+
+func lastLine(b []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	return lines[len(lines)-1]
 }
