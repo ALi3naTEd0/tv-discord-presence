@@ -94,3 +94,28 @@ func (s *Store) SetHidden(ctx context.Context, id int64, h model.Hidden) error {
 	}
 	return nil
 }
+
+// SettingsWithPrefix returns the user's settings whose key starts with
+// prefix, by the rest of the key.
+func (s *Store) SettingsWithPrefix(ctx context.Context, userID int64, prefix string) (map[string]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings WHERE user_id = ? AND substr(key, 1, ?) = ?",
+		userID, len(prefix), prefix)
+	if err != nil {
+		return nil, fmt.Errorf("store: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, fmt.Errorf("store: %w", err)
+		}
+		out[k[len(prefix):]] = v
+	}
+	return out, rows.Err()
+}
+
+// DeleteSetting forgets a user setting.
+func (s *Store) DeleteSetting(ctx context.Context, userID int64, key string) error {
+	return s.exec(ctx, "DELETE FROM settings WHERE user_id = ? AND key = ?", userID, key)
+}

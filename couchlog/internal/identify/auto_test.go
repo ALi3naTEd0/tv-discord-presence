@@ -174,3 +174,22 @@ func TestTitleSimilarity(t *testing.T) {
 		t.Errorf("unrelated: %v", r)
 	}
 }
+
+func TestAutoAliasForAShowNameGuessesTheEpisode(t *testing.T) {
+	id, st := autoRig(t)
+	ctx := context.Background()
+	disney := &model.Session{App: model.App{ID: "com.disney.disneyplus"}, Hint: model.Hint{Title: "Looksmaxxing extremo"}}
+	if it, _, _ := id.Auto(ctx, store.LocalUserID, disney); it != nil {
+		t.Fatalf("identified before any alias: %+v", it)
+	}
+	// you identified it once as the show and asked to remember
+	st.SaveAlias(ctx, model.Alias{UserID: store.LocalUserID, AppID: "com.disney.disneyplus", MatchTitle: "Looksmaxxing extremo",
+		Identity: model.Identity{Kind: model.KindEpisode, Title: "Unseamly", TMDB: 300101}}, time.Now())
+	dev, _ := st.EnsureDevice(ctx, store.LocalUserID, "androidtv", "Box", "")
+	sess, _ := st.StartSession(ctx, dev, model.App{ID: "com.disney.disneyplus"}, "", time.Now().Add(-time.Hour))
+	st.Identify(ctx, sess.ID, []model.Item{{Identity: model.Identity{Kind: model.KindEpisode, Title: "Unseamly", TMDB: 300101, Season: 1, Episode: 1}}}, nil, time.Now())
+	it, how, err := id.Auto(ctx, store.LocalUserID, disney)
+	if err != nil || it == nil || it.TMDB != 300101 || it.Episode != 2 || how != ByProgress {
+		t.Errorf("%+v %q %v", it, how, err)
+	}
+}

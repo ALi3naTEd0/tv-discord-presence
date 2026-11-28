@@ -59,6 +59,8 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/upnext", a.upNext)
 	mux.HandleFunc("GET /api/v1/services", a.services)
 	mux.HandleFunc("PUT /api/v1/services/{key}", a.putService)
+	mux.HandleFunc("POST /api/v1/services", a.addService)
+	mux.HandleFunc("DELETE /api/v1/services/{key}", a.removeService)
 	mux.HandleFunc("PUT /api/v1/settings/{key}", a.putSetting)
 	mux.HandleFunc("GET /api/v1/setup/scan", a.scan)
 	mux.HandleFunc("POST /api/v1/setup/devices", a.addDevice)

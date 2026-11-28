@@ -22,8 +22,11 @@ var known = []struct {
 	{[]string{"youtube"}, ServiceInfo{Key: "youtube", Name: "YouTube", Free: "free"}},
 	{[]string{"tubi"}, ServiceInfo{Key: "tubi", Name: "Tubi", Free: "ads"}},
 	{[]string{"disney"}, ServiceInfo{Key: "disney", Name: "Disney+"}},
-	{[]string{"amazon", "primevideo", "prime video"}, ServiceInfo{Key: "prime", Name: "Prime Video"}},
-	{[]string{"appletv", "apple tv"}, ServiceInfo{Key: "appletv", Name: "Apple TV+"}},
+	{[]string{"amazon", "primevideo", "prime video", "prime"}, ServiceInfo{Key: "prime", Name: "Prime Video"}},
+	{[]string{"hulu"}, ServiceInfo{Key: "hulu", Name: "Hulu"}},
+	{[]string{"peacock"}, ServiceInfo{Key: "peacock", Name: "Peacock"}},
+	{[]string{"starz"}, ServiceInfo{Key: "starz", Name: "STARZ"}},
+	{[]string{"appletv", "apple tv", "apple"}, ServiceInfo{Key: "appletv", Name: "Apple TV+"}},
 	{[]string{"paramount"}, ServiceInfo{Key: "paramount", Name: "Paramount+"}},
 	{[]string{"crunchyroll"}, ServiceInfo{Key: "crunchyroll", Name: "Crunchyroll"}},
 	{[]string{"pluto"}, ServiceInfo{Key: "pluto", Name: "Pluto TV", Free: "ads"}},
@@ -46,4 +49,32 @@ func ServiceOf(appID, appName string) ServiceInfo {
 		name = appID
 	}
 	return ServiceInfo{Key: appID, Name: name}
+}
+
+// keyFor turns a name you type ("Disney Plus", "disney+") into a service:
+// a known one when it matches, else a short key made from the name.
+func keyFor(name string) ServiceInfo {
+	if info := ServiceOf("", name); info.Key != "" {
+		for _, k := range known {
+			if k.info.Key == info.Key {
+				return info
+			}
+		}
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return ServiceInfo{Key: b.String(), Name: strings.TrimSpace(name)}
+}
+
+func knownInfo(key string) (ServiceInfo, bool) {
+	for _, k := range known {
+		if k.info.Key == key {
+			return k.info, true
+		}
+	}
+	return ServiceInfo{}, false
 }

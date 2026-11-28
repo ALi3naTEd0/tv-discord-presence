@@ -224,9 +224,10 @@ func TestAutoAliasWins(t *testing.T) {
 	if it == nil || it.Kind != model.KindEpisode || it.Episode != 1 || how != ByAlias {
 		t.Errorf("show alias %+v %q", it, how)
 	}
-	// A show alias without episode numbers cannot become an item: left to the user.
-	if it, _, _ := id.Auto(ctx, store.LocalUserID, session("hbo", "Curse", 0, 0)); it != nil {
-		t.Errorf("show alias without episode: %+v", it)
+	// A show alias without episode numbers (the app gave only the show's
+	// name) becomes a guess you confirm: the episode after your last.
+	if it, how, _ := id.Auto(ctx, store.LocalUserID, session("hbo", "Curse", 0, 0)); it == nil || how != ByProgress || !how.Guessed() {
+		t.Errorf("show alias without episode: %+v %q", it, how)
 	}
 	// Aliases also work for apps where titles are never guessed.
 	st.SaveAlias(ctx, model.Alias{UserID: store.LocalUserID, AppID: "com.google.android.youtube.tv", MatchTitle: "Dune full movie",

@@ -371,3 +371,45 @@ func (a *API) putSetting(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// addService remembers a service you pay for that Couchlog has not seen on
+// your TV yet, so it can take a price now.
+func (a *API) addService(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !readJSON(w, r, &req) {
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || len([]rune(name)) > 60 {
+		badRequest(w, "a service name, up to 60 characters")
+		return
+	}
+	info := keyFor(name)
+	if info.Key == "" || len(info.Key) > 60 {
+		badRequest(w, "write the service's name with letters")
+		return
+	}
+	if err := a.Store.SetSetting(r.Context(), store.LocalUserID, "service:"+info.Key, info.Name); err != nil {
+		a.fail(w, err)
+		return
+	}
+	a.services(w, r)
+}
+
+// removeService forgets a service you added and its price. A service
+// Couchlog sees on your TV stays listed (it comes back with its hours).
+func (a *API) removeService(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	ctx := r.Context()
+	if err := a.Store.DeleteSetting(ctx, store.LocalUserID, "service:"+key); err != nil {
+		a.fail(w, err)
+		return
+	}
+	if err := a.Store.SetSubscription(ctx, store.LocalUserID, key, nil, a.now()); err != nil {
+		a.fail(w, err)
+		return
+	}
+	a.services(w, r)
+}

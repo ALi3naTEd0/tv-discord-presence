@@ -49,15 +49,23 @@
     try { await api.setCurrency(c); data.currency = c; for (const k in drafts) if (!data.services.find(s => s.key === k)?.price) drafts[k].currency = c }
     catch (e) { toast((e as Error).message) }
   }
-  function add() {
+  async function add() {
     const name = adding.trim()
     if (!name || !data) return
-    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, '')
-    if (!key || data.services.some(s => s.key === key)) { adding = ''; return }
-    data.services = [...data.services, { key, name, hours: 0, devices: [] }]
-    drafts[key] = { price: '', currency: data.currency, period: 'month', open: true }
-    adding = ''
+    try {
+      const before = new Set(data.services.map(x => x.key))
+      apply(await api.addService(name))
+      const fresh = data!.services.find(x => !before.has(x.key))
+      if (fresh) drafts[fresh.key].open = true
+      toast(fresh ? `Added ${fresh.name}: set its price` : `${name} is already in the list`)
+      adding = ''
+    } catch (e) { toast(`Not added: ${(e as Error).message}`) }
   }
+  async function remove(s: ServiceRow) {
+    try { apply(await api.removeService(s.key)); toast(`Removed ${s.name}`) }
+    catch (e) { toast(`Not removed: ${(e as Error).message}`) }
+  }
+
 
   const paid = $derived(data?.services.filter(s => s.price) ?? [])
   const totals = $derived.by(() => {
@@ -119,7 +127,8 @@
             <Logo slug={s.key} size={40} fallback={s.name} />
             <div class="si">
               <div class="sn">{s.name}</div>
-              <div class="sd">{s.devices.length ? `On ${s.devices.join(', ')}` : 'Added by you'}</div>
+              <div class="sd">{s.devices.length ? `On ${s.devices.join(', ')}` : 'Added by you'}
+                {#if s.added && !s.devices.length}· <button class="link rm" onclick={() => remove(s)}>Remove</button>{/if}</div>
               <label class="prof" title={s.profile_from === 'netflix' ? 'Read from your Netflix connection. Type another name to change it.' : 'Which profile you use on this service'}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
                 <input aria-label="{s.name} profile" placeholder="Your profile" bind:value={profiles[s.key]}
@@ -187,6 +196,8 @@
   .prof .auto { font-size: 11px; color: var(--sent-fg); white-space: nowrap; }
   .sd { font-size: 12px; color: var(--muted); }
   .free { grid-column: span 1; font-size: 14px; color: var(--muted); white-space: nowrap; }
+  .rm { color: var(--muted); font-size: 12px; }
+  .rm:hover { color: #ff9aa0; }
   .link { background: none; border: 0; padding: 0; color: var(--accent); font-size: 13px; }
   .h { font-size: 14px; color: var(--text-2); }
   .per { font-size: 15px; font-weight: 600; }

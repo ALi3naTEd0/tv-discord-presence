@@ -116,6 +116,12 @@ func (id *Identifier) Auto(ctx context.Context, userID int64, s *model.Session) 
 				}
 				return &it, ByAlias, nil
 			}
+			if !hasEp && sub == "" && n == title {
+				// The app published only the show's name (Disney+): which
+				// episode is unknown, so the one after your last is a guess
+				// you confirm.
+				return id.guessNext(ctx, userID, a.TMDB)
+			}
 			return id.episodeOf(ctx, userID, a.TMDB, season, episode, epName, title, ByAlias)
 		}
 	}
@@ -266,6 +272,13 @@ func (id *Identifier) episodeOf(ctx context.Context, userID int64, show, season,
 		return nil, "", nil // the name is ambiguous, or not this show's
 	}
 	// The show lists no episode names yet: guess the one after your last.
+	return id.guessNext(ctx, userID, show)
+}
+
+// guessNext is the episode after your last one of show (S1E1 if none), as
+// a guess (ByProgress) that waits for you to confirm it.
+func (id *Identifier) guessNext(ctx context.Context, userID int64, show int) (*model.Item, Method, error) {
+	var err error
 	next := model.Item{Identity: model.Identity{Kind: model.KindEpisode, TMDB: show, Season: 1, Episode: 0}}
 	if id.History != nil {
 		if s, e, ok, err := id.History.LastEpisode(ctx, userID, show); err != nil {

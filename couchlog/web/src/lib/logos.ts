@@ -1,4 +1,6 @@
 // Official marks from Simple Icons (CC0 icon data; the marks belong to their owners).
+import { siAppletv, siCrunchyroll, siGoogletv, siJellyfin, siKodi, siLetterboxd, siMubi, siParamountplus, siRoku, siStarz } from 'simple-icons'
+
 export interface Mark { label: string; tile: string; fill: string; k: number; d: string }
 
 export const MARKS: Record<string, Mark> = {
@@ -13,6 +15,36 @@ export const MARKS: Record<string, Mark> = {
   themoviedatabase: { label: 'TMDB', tile: '#0D253F', fill: '#01B4E4', k: 0.8, d: 'M6.62 12a2.291 2.291 0 0 1 2.292-2.295h-.013A2.291 2.291 0 0 1 11.189 12a2.291 2.291 0 0 1-2.29 2.291h.013A2.291 2.291 0 0 1 6.62 12zm10.72-4.062h4.266a2.291 2.291 0 0 0 2.29-2.291 2.291 2.291 0 0 0-2.29-2.296H17.34a2.291 2.291 0 0 0-2.291 2.296 2.291 2.291 0 0 0 2.29 2.29zM2.688 20.645h8.285a2.291 2.291 0 0 0 2.291-2.292 2.291 2.291 0 0 0-2.29-2.295H2.687a2.291 2.291 0 0 0-2.291 2.295 2.291 2.291 0 0 0 2.29 2.292zm10.881-6.354h.81l1.894-4.586H15.19l-1.154 3.008h-.013l-1.135-3.008h-1.154zm4.208 0h1.011V9.705h-1.011zm2.878 0h3.235v-.93h-2.223v-.933h1.99v-.934h-1.99v-.855h2.107v-.934h-3.112zM1.31 7.941h1.01V4.247h1.31v-.895H0v.895h1.31zm3.747 0h1.011V5.959h1.958v1.984h1.011v-4.59h-1.01v1.711H6.061V3.351H5.057zm5.348 0h3.242v-.933H11.41v-.934h1.99v-.933h-1.99v-.856h2.107v-.934h-3.112zM.162 14.296h1.005v-3.52h.013l1.167 3.52h.765l1.206-3.52h.013v3.52h1.011v-4.59H3.82L2.755 12.7h-.013L1.686 9.705H.156z' }
 }
 
+const fromSI = (i: { title: string; hex: string; path: string }, tile: string, fill = '#FFFFFF', k = 0.66): Mark =>
+  ({ label: i.title, tile, fill, k, d: i.path })
+
+Object.assign(MARKS, {
+  appletv: fromSI(siAppletv, '#000000'),
+  paramount: fromSI(siParamountplus, '#0064FF'),
+  crunchyroll: fromSI(siCrunchyroll, '#FF5E00'),
+  mubi: fromSI(siMubi, '#000000'),
+  starz: fromSI(siStarz, '#082125'),
+  googletv: fromSI(siGoogletv, '#FFFFFF', '#4285F4'),
+  roku: fromSI(siRoku, '#662D91', '#FFFFFF', 0.86),
+  jellyfin: fromSI(siJellyfin, '#101418', '#00A4DC'),
+  kodi: fromSI(siKodi, '#17B2E7'),
+  letterboxd: fromSI(siLetterboxd, '#202830'),
+})
+
+/**
+ * Services whose marks are not in Simple Icons (their owners asked for them
+ * out): a tile in the brand's color with the name, not a copy of the logo.
+ */
+export interface Word { label: string; tile: string; fill: string; text: string }
+export const WORDS: Record<string, Word> = {
+  disney: { label: 'Disney+', tile: '#0E1C5A', fill: '#FFFFFF', text: 'D+' },
+  prime: { label: 'Prime Video', tile: '#00A8E1', fill: '#FFFFFF', text: 'prime' },
+  hulu: { label: 'Hulu', tile: '#1CE783', fill: '#0B0C0F', text: 'hulu' },
+  peacock: { label: 'Peacock', tile: '#000000', fill: '#FFFFFF', text: 'P' },
+  pluto: { label: 'Pluto TV', tile: '#FFF200', fill: '#0B0C0F', text: 'pluto' },
+  vix: { label: 'ViX', tile: '#FF5A00', fill: '#FFFFFF', text: 'ViX' },
+}
+
 /** The mark for an app, by its id or name on any device ("com.netflix.ninja", "netflix", "HBO Max"). */
 export function slugFor(appId: string, appName = ''): string | undefined {
   const s = `${appId} ${appName}`.toLowerCase()
@@ -21,5 +53,13 @@ export function slugFor(appId: string, appName = ''): string | undefined {
   if (s.includes('plex')) return 'plex'
   if (s.includes('youtube')) return 'youtube'
   if (s.includes('tubi')) return 'tubi'
+  if (s.includes('disney')) return 'disney'
+  if (s.includes('amazon') || s.includes('prime')) return 'prime'
+  if (s.includes('appletv') || s.includes('apple tv')) return 'appletv'
+  if (s.includes('paramount')) return 'paramount'
+  if (s.includes('crunchyroll')) return 'crunchyroll'
+  if (s.includes('pluto')) return 'pluto'
+  if (s.includes('vix')) return 'vix'
+  if (s.includes('mubi')) return 'mubi'
   return undefined
 }

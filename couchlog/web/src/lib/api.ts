@@ -86,7 +86,7 @@ export interface Insights {
   currency: string
 }
 
-export interface ServiceRow extends ServiceHours { devices: string[]; profile?: string; profile_from?: 'you' | 'netflix' }
+export interface ServiceRow extends ServiceHours { devices: string[]; profile?: string; profile_from?: 'you' | 'netflix'; added?: boolean }
 export interface Services { currency: string; services: ServiceRow[] }
 
 export interface UpNext {
@@ -131,6 +131,8 @@ export const api = {
   setHidden: (id: number, hidden: boolean) => call<Session>('POST', `/api/v1/sessions/${id}/hidden`, { hidden }),
   setPrice: (key: string, price: number, currency: string, period: string) =>
     call<Services>('PUT', `/api/v1/services/${encodeURIComponent(key)}`, { price, currency, period }),
+  addService: (name: string) => call<Services>('POST', '/api/v1/services', { name }),
+  removeService: (key: string) => call<Services>('DELETE', `/api/v1/services/${encodeURIComponent(key)}`),
   setCurrency: (value: string) => call<void>('PUT', '/api/v1/settings/currency', { value }),
   scan: () => get<FoundDevice[]>('/api/v1/setup/scan'),
   addDevice: (kind: string, host: string, name: string) => call<{ id: number }>('POST', '/api/v1/setup/devices', { kind, host, name }),

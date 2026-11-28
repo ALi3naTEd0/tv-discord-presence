@@ -174,3 +174,56 @@ func TestLetterboxdExport(t *testing.T) {
 		t.Errorf("history: %d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestAddServiceByHand(t *testing.T) {
+	a, _, _ := rig(t)
+	rec := do(a, "POST", "/api/v1/services", `{"name":"Disney Plus"}`)
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var s Services
+	json.Unmarshal(rec.Body.Bytes(), &s)
+	var disney *ServiceRow
+	for i := range s.Services {
+		if s.Services[i].Key == "disney" {
+			disney = &s.Services[i]
+		}
+	}
+	if disney == nil || disney.Name != "Disney+" || !disney.Added {
+		t.Fatalf("%+v", s.Services)
+	}
+	// it stays without a price, takes one, and goes away when removed
+	if rec := do(a, "PUT", "/api/v1/services/disney", `{"price":179,"currency":"MXN","period":"month"}`); rec.Code != 200 {
+		t.Fatalf("price: %d", rec.Code)
+	}
+	json.Unmarshal(do(a, "GET", "/api/v1/services", "").Body.Bytes(), &s)
+	found := false
+	for _, x := range s.Services {
+		if x.Key == "disney" && x.Price != nil && x.Price.Amount == 179 {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("price not kept: %+v", s.Services)
+	}
+	req := httptest.NewRequest("DELETE", "/api/v1/services/disney", nil)
+	rec = httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, req)
+	json.Unmarshal(rec.Body.Bytes(), &s)
+	for _, x := range s.Services {
+		if x.Key == "disney" {
+			t.Errorf("still there: %+v", x)
+		}
+	}
+	// a name Couchlog does not know gets its own key
+	json.Unmarshal(do(a, "POST", "/api/v1/services", `{"name":"Cine Club MX"}`).Body.Bytes(), &s)
+	ok := false
+	for _, x := range s.Services {
+		if x.Key == "cineclubmx" && x.Name == "Cine Club MX" {
+			ok = true
+		}
+	}
+	if !ok {
+		t.Errorf("custom: %+v", s.Services)
+	}
+}

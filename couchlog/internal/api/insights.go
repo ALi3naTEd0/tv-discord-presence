@@ -220,11 +220,10 @@ func (a *API) computeInsights(ctx context.Context, days int) (*Insights, error) 
 	// services you pay for but did not watch in the period still show: that is the point
 	for key, sub := range subs {
 		if svc[key] == nil {
-			info := ServiceInfo{Key: key, Name: key}
-			for _, k := range known {
-				if k.info.Key == key {
-					info = k.info
-				}
+			info, ok := knownInfo(key)
+			if !ok {
+				name, _ := a.Store.Setting(ctx, store.LocalUserID, "service:"+key, key)
+				info = ServiceInfo{Key: key, Name: name}
 			}
 			in.Services = append(in.Services, ServiceHours{ServiceInfo: info, Price: priceOf(sub)})
 		}
@@ -277,6 +276,7 @@ type ServiceRow struct {
 	// "netflix"); other services do not say, so you type it ("you").
 	Profile     string `json:"profile,omitempty"`
 	ProfileFrom string `json:"profile_from,omitempty"`
+	Added       bool   `json:"added,omitempty"` // you added it by hand: you can remove it
 }
 
 // Services is the Services screen: every service seen plus every one with a price.
@@ -326,6 +326,27 @@ func (a *API) services(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out.Services = append(out.Services, ServiceRow{ServiceInfo: info, Devices: names})
+	}
+	// services you added yourself (one you pay for but Couchlog has not seen yet)
+	added, err := a.Store.SettingsWithPrefix(r.Context(), store.LocalUserID, "service:")
+	if err != nil {
+		a.fail(w, err)
+		return
+	}
+	have := map[string]int{}
+	for i, x := range out.Services {
+		have[x.Key] = i
+	}
+	for key, name := range added {
+		if i, ok := have[key]; ok {
+			out.Services[i].Added = true
+			continue
+		}
+		info, ok := knownInfo(key)
+		if !ok {
+			info = ServiceInfo{Key: key, Name: name}
+		}
+		out.Services = append(out.Services, ServiceRow{ServiceInfo: info, Devices: []string{}, Added: true})
 	}
 	if err := a.fillProfiles(r.Context(), out.Services); err != nil {
 		a.fail(w, err)
